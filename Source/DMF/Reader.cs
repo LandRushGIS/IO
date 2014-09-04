@@ -26,6 +26,35 @@ namespace LandRush.IO.DMF
 		}
 	}
 
+	public struct Version
+	{
+		public Version(uint major, uint minor)
+		{
+			this.Major = major;
+			this.Minor = minor;
+		}
+
+		public override string ToString()
+		{
+			return Major.ToString() + "." + Minor.ToString();
+		}
+
+		public readonly uint Major;
+		public readonly uint Minor;
+	}
+
+	public class Signature
+	{
+		public Signature(Version version, bool isCompressed)
+		{
+			this.Version = version;
+			this.IsCompressed = isCompressed;
+		}
+
+		public readonly Version Version;
+		public readonly bool IsCompressed;
+	}
+
 	public class Header
 	{
 		public Header(double scale, uint objectCount, string name, string leftFile, string rightFile)
@@ -61,7 +90,15 @@ namespace LandRush.IO.DMF
 	{
 		public static void Read(Stream stream)
 		{
-			using (var reader = new BinaryReader(stream))
+			var signature = ReadSignature(stream);
+			if (signature.Version.Major != 1 ||
+				signature.Version.Minor != 10)
+				throw new System.NotSupportedException("Version " + signature.Version + " is not supported");
+
+			Stream inputStream = !signature.IsCompressed ?
+					stream :
+					new System.IO.Compression.ZLibStream(stream, System.IO.Compression.CompressionMode.Decompress, true);
+			using (var reader = new BinaryReader(inputStream))
 			{
 				var header = ReadHeader(reader);
 				ReadLayerList(reader);
@@ -71,15 +108,27 @@ namespace LandRush.IO.DMF
 			}
 		}
 
+		private static Signature ReadSignature(Stream stream)
+		{
+			// 32-byte text signature, for example:
+			// 'GeoSystem DMF, Version 1.10 C  \x1A'
+			byte[] signature = new byte[32];
+			int result = stream.Read(signature, 0, signature.Length);
+			if (result != signature.Length)
+				throw new System.IO.InvalidDataException("Invalid file format: expected 32-byte signature");
+			string versionString = System.Text.Encoding.ASCII.GetString(signature, 23, 4).Trim();
+			string[] versionStringComponents = versionString.Split('.');
+			uint majorVersion = uint.Parse(versionStringComponents[0]);
+			uint minorVersion = uint.Parse(versionStringComponents[1]);
+			bool isCompressed = signature[28] == (byte)'C';
+			return new Signature(new Version(majorVersion, minorVersion), isCompressed);
+		}
+
 		private static Header ReadHeader(BinaryReader reader)
 		{
-			// 32-byte text signature
-			// 'GeoSystem DMF, Version 1.10 C'
-			byte[] signature = reader.ReadBytes(32);
-
 			// header size - 4-byte integer
 			uint headerSize = reader.ReadUInt32();
-			if (headerSize != 910) throw new System.IO.IOException("Invalid file format: unsupported header size");
+			if (headerSize < 910) throw new System.IO.InvalidDataException("Invalid file format: unsupported header size");
 
 			// map scale - 10-byte real
 			double scale = reader.ReadExtended();
@@ -97,13 +146,16 @@ namespace LandRush.IO.DMF
 			byte[] frame = reader.ReadBytes(120); // !!!
 
 			// map name
-			string mapName = reader.ReadShortString(256);
+			string mapName = reader.ReadShortString(255);
 
 			// left stereo photo file name
-			string leftStereoFileName = reader.ReadShortString(256);
+			string leftStereoFileName = reader.ReadShortString(255);
 
 			// right stereo photo file name
-			string rightStereoFileName = reader.ReadShortString(253);
+			string rightStereoFileName = reader.ReadShortString(255);
+
+			// HACK: skip other data
+			byte[] otherData = reader.ReadBytes((int)(headerSize - 910));
 
 			return new Header(scale, objectCount, mapName, leftStereoFileName, rightStereoFileName);
 		}
@@ -115,7 +167,7 @@ namespace LandRush.IO.DMF
 
 			// List header size in bytes
 			uint headerSize = reader.ReadUInt32();
-			if (headerSize != 13) throw new System.IO.IOException("Invalid file format: unsupported layer list header size");
+			if (headerSize != 13) throw new System.IO.InvalidDataException("Invalid file format: unsupported layer list header size");
 
 			// Normal layers count
 			uint layersCount = reader.ReadUInt32();
@@ -209,7 +261,7 @@ namespace LandRush.IO.DMF
 				uint fontSize10 = reader.ReadUInt32();
 
 				// HACK: skip other data
-				byte[] anotherData = reader.ReadBytes(48);
+				byte[] otherData = reader.ReadBytes(48);
 
 				if ((int)layerDescriptorSize != (
 					63 +
@@ -217,8 +269,8 @@ namespace LandRush.IO.DMF
 					fontName.Length + 1 +
 					format.Length + 1 +
 					(int)(parameterAvailableLength) +
-					anotherData.Length))
-					throw new System.IO.IOException("Invalid file format: invalid layer descriptor size or content");
+					otherData.Length))
+					throw new System.IO.InvalidDataException("Invalid file format: invalid layer descriptor size or content");
 			}
 		}
 
@@ -229,7 +281,7 @@ namespace LandRush.IO.DMF
 
 			// List header size in bytes
 			uint headerSize = reader.ReadUInt32();
-			if (headerSize != 13) throw new System.IO.IOException("Invalid file format: unsupported parameter list header size");
+			if (headerSize != 13) throw new System.IO.InvalidDataException("Invalid file format: unsupported parameter list header size");
 
 			// Normal parameters count
 			uint parametersCount = reader.ReadUInt32();
@@ -282,7 +334,7 @@ namespace LandRush.IO.DMF
 
 			// Symbol header size in bytes
 			uint headerSize = reader.ReadUInt32();
-			if (headerSize != 24) throw new System.IO.IOException("Invalid file format: unsupported symbol header size");
+			if (headerSize != 24) throw new System.IO.InvalidDataException("Invalid file format: unsupported symbol header size");
 
 			uint id = reader.ReadUInt32();
 

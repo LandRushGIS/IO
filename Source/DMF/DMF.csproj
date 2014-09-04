@@ -38,6 +38,7 @@
   <ItemGroup>
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Reader.cs" />
+    <Compile Include="ZLibStream.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="GeoAPI">
