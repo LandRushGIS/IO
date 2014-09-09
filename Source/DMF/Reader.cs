@@ -97,7 +97,7 @@ namespace LandRush.IO.DMF
 
 			Stream inputStream = !signature.IsCompressed ?
 					stream :
-					new System.IO.Compression.ZLibStream(stream, System.IO.Compression.CompressionMode.Decompress, true);
+					new LandRush.IO.Compression.ZLibStream(stream, System.IO.Compression.CompressionMode.Decompress, true);
 			using (var reader = new BinaryReader(inputStream))
 			{
 				var header = ReadHeader(reader);

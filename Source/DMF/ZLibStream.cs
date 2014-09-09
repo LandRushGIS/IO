@@ -1,11 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.IO;
+using System.IO.Compression;
 
-namespace System.IO.Compression
+namespace LandRush.IO.Compression
 {
-	// http://www.ietf.org/rfc/rfc1950.txt
 	// http://blogs.msdn.com/b/bclteam/archive/2007/05/16/system-io-compression-capabilities-kim-hamilton.aspx
 
 	// TODO: Write support
@@ -15,8 +13,13 @@ namespace System.IO.Compression
 	// TODO: Exception specification
 
 	/// <summary>
-	/// Provides support for reading zlib-compressed streams (RFC 1950). Wraps DeflateStream.
+	/// Provides support for reading zlib-compressed streams.
 	/// </summary>
+	/// <remarks>
+	/// Implements (<see href="http://www.ietf.org/rfc/rfc1950.txt">IETF RFC 1950</see>) specification for zlib compression.
+	/// Wraps <see cref="T:System.IO.Compression.DeflateStream"/>
+	/// </remarks>
+	/// <seealso cref="T:System.IO.Compression.DeflateStream"/>
 	public class ZLibStream : Stream
 	{
 		private const string messageNotSupported = "Not supported";
