@@ -1,6 +1,9 @@
 ﻿using Stream = System.IO.Stream;
 using BinaryReader = System.IO.BinaryReader;
 using BitArray = System.Collections.BitArray;
+using BitConverter = System.BitConverter;
+using Int16 = System.Int16;
+using UInt64 = System.UInt64;
 using System.Collections.Generic;
 
 namespace LandRush.IO.DMF
@@ -18,11 +21,45 @@ namespace LandRush.IO.DMF
 			return result;
 		}
 
-		[System.Security.SecuritySafeCritical]
+		const Int16 extendedExponentBias = 16383;
+		const Int16 doubleExponentBias = 1023;
+
 		public static double ReadExtended(this BinaryReader reader)
 		{
 			byte[] buffer = reader.ReadBytes(10);
-			return 0.0;
+
+			// read sign
+			int sign = buffer[9] >> 7;
+
+			// read exponent
+			Int16 biasedExtendedExponent = BitConverter.ToInt16(new byte[] { buffer[8], (byte)(buffer[9] & 0x7f) }, 0);
+
+			// read integer bit of significand
+			int intBit = buffer[7] >> 7;
+
+			// read significand
+			UInt64 significand = 0;
+			significand = (UInt64)(buffer[7] & 0x7f);
+			for (int i = 6; i >= 0; i--)
+				significand = (significand << 8) | buffer[i];
+
+			Int16 biasedDoubleExponent = 0;
+			if (biasedExtendedExponent == 0)
+			{
+				// signed zero or denormalized number
+				biasedDoubleExponent = 0;
+			}
+			else
+			{
+				// normalized number
+				biasedDoubleExponent = (Int16)(biasedExtendedExponent - extendedExponentBias + doubleExponentBias);
+				if ((biasedDoubleExponent < 1) || (biasedDoubleExponent > 2046))
+					throw new System.OverflowException();
+			}
+
+			UInt64 doubleBits = (UInt64)sign << 63 | (UInt64)biasedDoubleExponent << 52 | significand >> 11;
+
+			return BitConverter.Int64BitsToDouble((System.Int64)doubleBits);
 		}
 	}
 
