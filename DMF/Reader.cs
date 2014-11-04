@@ -1,132 +1,21 @@
-﻿using Stream = System.IO.Stream;
-using BinaryReader = System.IO.BinaryReader;
+﻿using BinaryReader = System.IO.BinaryReader;
 using BitArray = System.Collections.BitArray;
 using BitConverter = System.BitConverter;
 using Int16 = System.Int16;
 using UInt64 = System.UInt64;
+using Stream = System.IO.Stream;
 using System.Collections.Generic;
+using Geometries = GeoAPI.Geometries;
 
 namespace LandRush.IO.DMF
 {
-	static class BinaryReaderUtils
-	{
-		public static string ReadShortString(this BinaryReader reader, int maxLength = 0)
-		{
-			byte length = reader.ReadByte();
-			string result = System.Text.Encoding.Default.GetString(reader.ReadBytes(length));
-			if (maxLength > length)
-			{
-				reader.ReadBytes(maxLength - length);
-			}
-			return result;
-		}
-
-		const Int16 extendedExponentBias = 16383;
-		const Int16 doubleExponentBias = 1023;
-
-		public static double ReadExtended(this BinaryReader reader)
-		{
-			byte[] buffer = reader.ReadBytes(10);
-
-			// read sign
-			int sign = buffer[9] >> 7;
-
-			// read exponent
-			Int16 biasedExtendedExponent = BitConverter.ToInt16(new byte[] { buffer[8], (byte)(buffer[9] & 0x7f) }, 0);
-
-			// read integer bit of significand
-			int intBit = buffer[7] >> 7;
-
-			// read significand
-			UInt64 significand = 0;
-			significand = (UInt64)(buffer[7] & 0x7f);
-			for (int i = 6; i >= 0; i--)
-				significand = (significand << 8) | buffer[i];
-
-			Int16 biasedDoubleExponent = 0;
-			if (biasedExtendedExponent == 0)
-			{
-				// signed zero or denormalized number
-				biasedDoubleExponent = 0;
-			}
-			else
-			{
-				// normalized number
-				biasedDoubleExponent = (Int16)(biasedExtendedExponent - extendedExponentBias + doubleExponentBias);
-				if ((biasedDoubleExponent < 1) || (biasedDoubleExponent > 2046))
-					throw new System.OverflowException();
-			}
-
-			UInt64 doubleBits = (UInt64)sign << 63 | (UInt64)biasedDoubleExponent << 52 | significand >> 11;
-
-			return BitConverter.Int64BitsToDouble((System.Int64)doubleBits);
-		}
-	}
-
-	public struct Version
-	{
-		public Version(uint major, uint minor)
-		{
-			this.Major = major;
-			this.Minor = minor;
-		}
-
-		public override string ToString()
-		{
-			return Major.ToString() + "." + Minor.ToString();
-		}
-
-		public readonly uint Major;
-		public readonly uint Minor;
-	}
-
-	public class Signature
-	{
-		public Signature(Version version, bool isCompressed)
-		{
-			this.Version = version;
-			this.IsCompressed = isCompressed;
-		}
-
-		public readonly Version Version;
-		public readonly bool IsCompressed;
-	}
-
-	public class Header
-	{
-		public Header(double scale, uint objectCount, string name, string leftFile, string rightFile)
-		{
-			this.Scale = scale;
-			this.ObjectCount = objectCount;
-			this.Name = name;
-			this.LeftFile = leftFile;
-			this.RightFile = rightFile;
-		}
-
-		// Знаменатель масштаба карты
-		public readonly double Scale;
-		// Количество топографических объектов на карте
-		public readonly uint ObjectCount;
-		// Наименование карты
-		public readonly string Name;
-		// Имя растрового файла, содержащего левый снимок стереопары или снимок (карту) для моно режима
-		public readonly string LeftFile;
-		// Имя растрового файла, содержащего правый снимок стереопары
-		public readonly string RightFile;
-	}
-
-	enum LayerVisibleStatus
-	{
-		Editable = 0,
-		Markable = 1,
-		Visible = 2,
-		Invisible = 3
-	}
-
 	public static class Reader
 	{
 		public static void Read(Stream stream)
 		{
+			ISet<Parameter> parameters = null;
+			ISet<Symbol> symbols = null;
+
 			var signature = ReadSignature(stream);
 			if (signature.Version.Major != 1 ||
 				signature.Version.Minor != 10)
@@ -221,7 +110,7 @@ namespace LandRush.IO.DMF
 			reader.ReadByte();
 
 			IDictionary<int, int> layerIDs = new Dictionary<int, int>((int)(layersCount + serviceLayersCount));
-			IDictionary<int, LayerVisibleStatus> layerVisibility = new Dictionary<int, LayerVisibleStatus>((int)(layersCount + serviceLayersCount));
+			IDictionary<int, Status> layerVisibility = new Dictionary<int, Status>((int)(layersCount + serviceLayersCount));
 
 			for (int layerNumber = firstServiceLayerNumber; layerNumber <= layersCount; layerNumber++)
 			{
@@ -232,7 +121,7 @@ namespace LandRush.IO.DMF
 				int layerStatus = reader.ReadInt32();
 
 				// !! Add to array of visibility status
-				layerVisibility[layerNumber] = (LayerVisibleStatus)((layerStatus >> 16) & 0xFF);
+				layerVisibility[layerNumber] = (Status)((layerStatus >> 16) & 0xFF);
 
 				// Layer ID
 				int layerID = reader.ReadInt32();
