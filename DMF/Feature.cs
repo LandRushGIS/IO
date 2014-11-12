@@ -17,13 +17,15 @@ namespace LandRush.IO.DMF
 			int id,
 			FeatureStatus status,
 			float scale,
-			ISet<Geometries.IPoint> points,
-			IDictionary<Parameter, string> parameterValues)
+			int symbolOrientation,
+			Geometries.IGeometry geometry,
+			IDictionary<Parameter, object> parameterValues)
 		{
 			this.id = id;
 			this.status = status;
 			this.scale = scale;
-			this.points = points;
+			this.symbolOrientation = symbolOrientation;
+			this.geometry = geometry;
 			this.parameterValues = parameterValues;
 		}
 
@@ -42,12 +44,17 @@ namespace LandRush.IO.DMF
 			get { return this.scale; }
 		}
 
-		public IEnumerable<Geometries.IPoint> GetPoints()
+		public int SymbolOrientation
 		{
-			return this.points;
+			get { return this.symbolOrientation; }
 		}
 
-		public string GetParameterValue(Parameter parameter)
+		public Geometries.IGeometry Geometry
+		{
+			get { return this.geometry; }
+		}
+
+		public object GetParameterValue(Parameter parameter)
 		{
 			return this.parameterValues[parameter];
 		}
@@ -55,7 +62,8 @@ namespace LandRush.IO.DMF
 		private int id;
 		private FeatureStatus status;
 		private float scale;
-		private ISet<Geometries.IPoint> points;
-		private IDictionary<Parameter, string> parameterValues;
+		private int symbolOrientation;
+		private Geometries.IGeometry geometry;
+		private IDictionary<Parameter, object> parameterValues;
 	}
 }

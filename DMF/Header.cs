@@ -4,13 +4,13 @@
 	{
 		public Header(
 			double scale,
-			uint objectCount,
+			uint featureCount,
 			string name,
 			string leftFile,
 			string rightFile)
 		{
 			this.Scale = scale;
-			this.ObjectCount = objectCount;
+			this.FeatureCount = featureCount;
 			this.Name = name;
 			this.LeftFile = leftFile;
 			this.RightFile = rightFile;
@@ -19,7 +19,7 @@
 		// Знаменатель масштаба карты
 		public readonly double Scale;
 		// Количество топографических объектов на карте
-		public readonly uint ObjectCount;
+		public readonly uint FeatureCount;
 		// Наименование карты
 		public readonly string Name;
 		// Имя растрового файла, содержащего левый снимок стереопары или снимок (карту) для моно режима

@@ -2,7 +2,7 @@
 {
 	public struct Pen
 	{
-		public Pen(int color = 0, int width = 0, byte style = 0)
+		public Pen(int color, int width, byte style)
 		{
 			this.Color = color;
 			this.Width = width;
@@ -16,7 +16,7 @@
 
 	public struct Brush
 	{
-		public Brush(int color = 0, byte style = 0)
+		public Brush(int color, byte style)
 		{
 			this.Color = color;
 			this.Style = style;
@@ -28,15 +28,21 @@
 
 	public struct Font
 	{
-		public Font(int color = 0, int size = 0, byte style = 0)
+		public Font(
+			int color,
+			int size,
+			byte style,
+			string name)
 		{
 			this.Color = color;
 			this.Size = size;
 			this.Style = style;
+			this.Name = name;
 		}
 
 		public readonly int Color;
 		public readonly int Size;
 		public readonly byte Style;
+		public readonly string Name;
 	}
 }

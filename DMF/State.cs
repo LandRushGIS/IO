@@ -1,6 +1,6 @@
 ﻿namespace LandRush.IO.DMF
 {
-	public enum Status
+	public enum State : byte
 	{
 		Unknown = 0,
 		Editable = 1,

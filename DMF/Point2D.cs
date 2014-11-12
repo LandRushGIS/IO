@@ -2,13 +2,13 @@
 {
 	public struct Point2D
 	{
-		public Point2D(double x = 0, double y = 0)
+		public Point2D(int x, int y)
 		{
 			this.X = x;
 			this.Y = y;
 		}
 
-		public readonly double X;
-		public readonly double Y;
+		public readonly int X;
+		public readonly int Y;
 	}
 }

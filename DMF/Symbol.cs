@@ -17,21 +17,28 @@ namespace LandRush.IO.DMF
 
 			public Primitive(
 				PrimitiveType type,
+				byte groupNumber,
 				Pen pen,
 				Brush brush,
-				Point2D topLeft,
-				Point2D bottomRight)
+				Point2D firstPoint,
+				Point2D secondPoint)
 			{
 				this.type = type;
+				this.groupNumber = groupNumber;
 				this.pen = pen;
 				this.brush = brush;
-				this.topLeft = topLeft;
-				this.bottomRight = bottomRight;
+				this.firstPoint = firstPoint;
+				this.secondPoint = secondPoint;
 			}
 
 			public PrimitiveType Type
 			{
 				get { return this.type; }
+			}
+
+			public byte GroupNumber
+			{
+				get { return this.groupNumber; }
 			}
 
 			public Pen Pen
@@ -44,21 +51,22 @@ namespace LandRush.IO.DMF
 				get { return this.Brush; }
 			}
 
-			public Point2D TopLeft
+			public Point2D FirstPoint
 			{
-				get { return this.topLeft; }
+				get { return this.firstPoint; }
 			}
 
-			public Point2D BottomRight
+			public Point2D SecondPoint
 			{
-				get { return this.bottomRight; }
+				get { return this.secondPoint; }
 			}
 
 			private PrimitiveType type;
+			private byte groupNumber;
 			private Pen pen;
 			private Brush brush;
-			private Point2D topLeft;
-			private Point2D bottomRight;
+			private Point2D firstPoint;
+			private Point2D secondPoint;
 		}
 
 		public enum SymbolType
@@ -74,39 +82,39 @@ namespace LandRush.IO.DMF
 
 		public Symbol(
 			SymbolType type,
-			int length,
-			int high,
+			uint length,
+			uint height,
 			ISet<Primitive> primitives)
 		{
 			this.type = type;
 			this.length = length;
-			this.high = high;
+			this.height = height;
 			this.primitives = primitives;
 		}
 
 		public SymbolType Type
 		{
-			get { return this.type;  }
+			get { return this.type; }
 		}
 
-		public int Length
+		public uint Length
 		{
 			get { return this.length; }
 		}
 
-		public int High
+		public uint Height
 		{
-			get { return this.high; }
+			get { return this.height; }
 		}
 
-		public IEnumerable<Primitive> GetPrimitives()
+		public IEnumerable<Primitive> Primitives
 		{
-			return this.primitives;
+			get { return this.primitives; }
 		}
 
 		private SymbolType type;
-		private int length;
-		private int high;
+		private uint length;
+		private uint height;
 		private ISet<Primitive> primitives;
 	}
 }

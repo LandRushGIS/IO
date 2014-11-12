@@ -6,31 +6,329 @@ using UInt64 = System.UInt64;
 using Stream = System.IO.Stream;
 using System.Collections.Generic;
 using Geometries = GeoAPI.Geometries;
+using NetTopologySuite.Geometries;
 
 namespace LandRush.IO.DMF
 {
 	public static class Reader
 	{
-		public static void Read(Stream stream)
+		public class Map
 		{
-			ISet<Parameter> parameters = null;
-			ISet<Symbol> symbols = null;
+			public Map(
+				string name,
+				double scale,
+				IList<Layer> layers,
+				IList<Layer> serviceLayers)
+			{
+				this.name = name;
+				this.scale = scale;
+				this.layers = layers;
+				this.serviceLayers = serviceLayers;
+			}
 
+			public string Name
+			{
+				get { return this.name; }
+			}
+
+			public double Scale
+			{
+				get { return this.scale; }
+			}
+
+			public IList<Layer> Layers
+			{
+				get { return this.layers; }
+			}
+
+			public IList<Layer> ServiceLayers
+			{
+				get { return this.layers; }
+			}
+
+			private string name;
+			private double scale;
+			private IList<Layer> layers;
+			private IList<Layer> serviceLayers;
+		}
+
+		internal struct LayerInfo
+		{
+			public int Id;
+			public string Name;
+			public State State;
+			public int MinScale;
+			public int MaxScale;
+			public Pen Pen;
+			public Brush Brush;
+			public uint SymbolNumber;
+			public Layer.LayerObjectsType ObjectsType;
+			public BitArray Parameters;
+		}
+
+		internal struct LayerLists
+		{
+			public LayerLists(IList<LayerInfo> layers, IList<LayerInfo> serviceLayers)
+			{
+				this.Layers = layers;
+				this.ServiceLayers = serviceLayers;
+			}
+
+			public readonly IList<LayerInfo> Layers;
+			public readonly IList<LayerInfo> ServiceLayers;
+		}
+
+		internal struct ParameterInfo
+		{
+			public int Id;
+			public string Name;
+			public System.Type ValueType;
+			public State State;
+			public int MinScale;
+			public int MaxScale;
+			public Brush Brush;
+			public Font Font;
+			public uint SymbolNumber;
+			public string Format;
+		}
+
+		internal struct ParameterLists
+		{
+			public ParameterLists(IList<ParameterInfo> parameters, IList<ParameterInfo> serviceParameters)
+			{
+				this.Parameters = parameters;
+				this.ServiceParameters = serviceParameters;
+			}
+
+			public readonly IList<ParameterInfo> Parameters;
+			public readonly IList<ParameterInfo> ServiceParameters;
+		}
+
+		internal struct FeatureInfo
+		{
+			public int LayerId;
+			public int Id;
+			public Feature.FeatureStatus Status;
+			public float Scale;
+			public int SymbolOrientation;
+			public IList<Geometries.Coordinate> Coordinates;
+			public IDictionary<int, string> Parameters;
+		}
+
+		public static Map Read(Stream stream)
+		{
 			var signature = ReadSignature(stream);
 			if (signature.Version.Major != 1 ||
 				signature.Version.Minor != 10)
+			{
 				throw new System.NotSupportedException("Version " + signature.Version + " is not supported");
+			}
 
 			Stream inputStream = !signature.IsCompressed ?
 					stream :
 					new LandRush.IO.Compression.ZLibStream(stream, System.IO.Compression.CompressionMode.Decompress, true);
 			using (var reader = new BinaryReader(inputStream))
 			{
-				var header = ReadHeader(reader);
-				ReadLayerList(reader);
-				ReadParameterList(reader);
-				ReadSymbolList(reader);
-				ReadObjectList(reader, header.ObjectCount);
+				Header header = ReadHeader(reader);
+				LayerLists layerLists = ReadLayerLists(reader);
+				ParameterLists parameterLists = ReadParameterLists(reader);
+				IList<Symbol> symbols = ReadSymbolList(reader);
+				ICollection<FeatureInfo> features = ReadFeatureList(reader, header.FeatureCount);
+
+				// create service parameter library
+				IList<Parameter> serviceParameters = new List<Parameter>();
+				foreach (ParameterInfo parameterInfo in parameterLists.ServiceParameters)
+				{
+					serviceParameters.Add(new Parameter(
+						parameterInfo.Id,
+						parameterInfo.Name,
+						parameterInfo.ValueType,
+						parameterInfo.State,
+						parameterInfo.MinScale,
+						parameterInfo.MaxScale,
+						parameterInfo.Brush,
+						parameterInfo.Font,
+						symbols[(int)parameterInfo.SymbolNumber - 1],
+						parameterInfo.Format));
+				}
+
+				// create parameter library
+				IList<Parameter> parameters = new List<Parameter>();
+				foreach (ParameterInfo parameterInfo in parameterLists.Parameters)
+				{
+					parameters.Add(new Parameter(
+						parameterInfo.Id,
+						parameterInfo.Name,
+						parameterInfo.ValueType,
+						parameterInfo.State,
+						parameterInfo.MinScale,
+						parameterInfo.MaxScale,
+						parameterInfo.Brush,
+						parameterInfo.Font,
+						symbols[(int)parameterInfo.SymbolNumber - 1],
+						parameterInfo.Format));
+				}
+
+				// sort features by layers
+				// TODO: the following code does not process layers containing objects that are not features
+				// TODO: thus such layers still will be contained in featuresByLayerId dictionary
+				// TODO: but their set of objects will be empty
+				IDictionary<int, ISet<Feature>> featuresByLayerId = new Dictionary<int, ISet<Feature>>();
+				foreach (FeatureInfo featureInfo in features)
+				{
+					if (!featuresByLayerId.ContainsKey(featureInfo.LayerId))
+					{
+						featuresByLayerId[featureInfo.LayerId] = new HashSet<Feature>();
+					}
+
+					// figure out layer id of the feature
+					Layer.LayerObjectsType geometryType = Layer.LayerObjectsType.Unknown;
+					for (int i = 0; i < layerLists.ServiceLayers.Count; i++)
+					{
+						if (layerLists.ServiceLayers[i].Id == featureInfo.LayerId)
+						{
+							geometryType = layerLists.ServiceLayers[i].ObjectsType;
+							break;
+						}
+					}
+					for (int i = 0; i < layerLists.Layers.Count; i++)
+					{
+						if (layerLists.Layers[i].Id == featureInfo.LayerId)
+						{
+							geometryType = layerLists.Layers[i].ObjectsType;
+							break;
+						}
+					}
+
+					// set geometry type for the feature
+					if (geometryType != Layer.LayerObjectsType.Unknown)
+					{
+						Geometries.IGeometry geometry = null;
+						switch (geometryType)
+						{
+							case Layer.LayerObjectsType.Symbol:
+							{
+								if (featureInfo.Coordinates.Count != 1)
+								{
+									throw new System.IO.InvalidDataException("Invalid coordinates count for point feature");
+								}
+								geometry = new NetTopologySuite.Geometries.Point(featureInfo.Coordinates[0]);
+								break;
+							}
+							case Layer.LayerObjectsType.Polyline:
+							case Layer.LayerObjectsType.SmoothPolyline:
+							{
+								Geometries.Coordinate[] coordinates = new Geometries.Coordinate[featureInfo.Coordinates.Count];
+								featureInfo.Coordinates.CopyTo(coordinates, 0);
+								geometry = new NetTopologySuite.Geometries.LineString(coordinates);
+								break;
+							}
+							case Layer.LayerObjectsType.Polygon:
+							case Layer.LayerObjectsType.SmoothPolygon:
+							{
+								// TODO: handle holes in polygones
+								Geometries.Coordinate[] coordinates = new Geometries.Coordinate[featureInfo.Coordinates.Count];
+								featureInfo.Coordinates.CopyTo(coordinates, 0);
+								Geometries.ILinearRing shell = new NetTopologySuite.Geometries.LinearRing(coordinates);
+								geometry = new NetTopologySuite.Geometries.Polygon(shell);
+								break;
+							}
+							// TODO: multigeometries support
+						}
+
+						// create parameter list for the feature
+						IDictionary<Parameter, object> parameterValues = new Dictionary<Parameter, object>();
+						foreach (KeyValuePair<int, string> parameterValueString in featureInfo.Parameters)
+						{
+							Parameter parameter =
+								parameterValueString.Key <= 0 ?
+									serviceParameters[parameterValueString.Key + serviceParameters.Count - 1] :
+									parameters[parameterValueString.Key - 1];			
+
+							parameterValues[parameter] = parsers[parameter.ValueType](parameterValueString.Value);
+						}
+
+						featuresByLayerId[featureInfo.LayerId].Add(new Feature(
+							featureInfo.Id,
+							featureInfo.Status,
+							featureInfo.Scale,
+							featureInfo.SymbolOrientation,
+							geometry,
+							parameterValues));
+					}
+				}
+
+				IList<Layer> serviceLayers = new List<Layer>();
+				foreach (LayerInfo layerInfo in layerLists.ServiceLayers)
+				{
+					ISet<Parameter> layerParameters = new HashSet<Parameter>();
+
+					for (int i = 0; i < 11; i++)
+					{
+						if (layerInfo.Parameters[i] == true)
+						{
+							layerParameters.Add(serviceParameters[i]);
+						}
+					}
+
+					for (int i = 11; i < layerInfo.Parameters.Count; i++)
+					{
+						if (layerInfo.Parameters[i] == true)
+						{
+							layerParameters.Add(parameters[i - 11]);
+						}
+					}
+
+					serviceLayers.Add(new Layer(
+						layerInfo.Id,
+						layerInfo.Name,
+						layerInfo.State,
+						layerInfo.MinScale,
+						layerInfo.MaxScale,
+						layerInfo.Pen,
+						layerInfo.Brush,
+						symbols[(int)layerInfo.SymbolNumber],
+						layerInfo.ObjectsType,
+						layerParameters,
+						featuresByLayerId[layerInfo.Id]));
+				}
+
+				IList<Layer> layers = new List<Layer>();
+				foreach (LayerInfo layerInfo in layerLists.ServiceLayers)
+				{
+					ISet<Parameter> layerParameters = new HashSet<Parameter>();
+
+					for (int i = 0; i < 11; i++)
+					{
+						if (layerInfo.Parameters[i] == true)
+						{
+							layerParameters.Add(serviceParameters[i]);
+						}
+					}
+
+					for (int i = 11; i < layerInfo.Parameters.Count; i++)
+					{
+						if (layerInfo.Parameters[i] == true)
+						{
+							layerParameters.Add(parameters[i - 11]);
+						}
+					}
+
+					layers.Add(new Layer(
+						layerInfo.Id,
+						layerInfo.Name,
+						layerInfo.State,
+						layerInfo.MinScale,
+						layerInfo.MaxScale,
+						layerInfo.Pen,
+						layerInfo.Brush,
+						symbols[(int)layerInfo.SymbolNumber],
+						layerInfo.ObjectsType,
+						layerParameters,
+						featuresByLayerId[layerInfo.Id]));
+				}
+
+				return new Map(header.Name, header.Scale, layers, serviceLayers);
 			}
 		}
 
@@ -41,12 +339,15 @@ namespace LandRush.IO.DMF
 			byte[] signature = new byte[32];
 			int result = stream.Read(signature, 0, signature.Length);
 			if (result != signature.Length)
+			{
 				throw new System.IO.InvalidDataException("Invalid file format: expected 32-byte signature");
+			}
 			string versionString = System.Text.Encoding.ASCII.GetString(signature, 23, 4).Trim();
 			string[] versionStringComponents = versionString.Split('.');
 			uint majorVersion = uint.Parse(versionStringComponents[0]);
 			uint minorVersion = uint.Parse(versionStringComponents[1]);
-			bool isCompressed = signature[28] == (byte)'C';
+			bool isCompressed = (signature[28] == (byte)'C');
+
 			return new Signature(new Version(majorVersion, minorVersion), isCompressed);
 		}
 
@@ -54,22 +355,26 @@ namespace LandRush.IO.DMF
 		{
 			// header size - 4-byte integer
 			uint headerSize = reader.ReadUInt32();
-			if (headerSize < 910) throw new System.IO.InvalidDataException("Invalid file format: unsupported header size");
+			if (headerSize < 910)
+			{
+				throw new System.IO.InvalidDataException("Invalid file format: unsupported header size");
+			}
 
 			// map scale - 10-byte real
 			double scale = reader.ReadExtended();
 
-			// object count - 4-byte integer
-			uint objectCount = reader.ReadUInt32();
+			// features count - 4-byte integer
+			uint featuresCount = reader.ReadUInt32();
 
-			// units - 4-byte integer
+			// units - 4-byte integer - reserved
 			int units = reader.ReadInt32();
 
-			// status - 4-byte integer
+			// status - 4-byte integer - reserved
 			int status = reader.ReadInt32();
 
 			// frame - 120 bytes total, 4 T3D structures, each contains 3 10-byte reals: X, Y, Z
-			byte[] frame = reader.ReadBytes(120); // !!!
+			// TODO: implement parsing
+			byte[] frame = reader.ReadBytes(120);
 
 			// map name
 			string mapName = reader.ReadShortString(255);
@@ -80,305 +385,709 @@ namespace LandRush.IO.DMF
 			// right stereo photo file name
 			string rightStereoFileName = reader.ReadShortString(255);
 
-			// HACK: skip other data
+			// skip other data
 			byte[] otherData = reader.ReadBytes((int)(headerSize - 910));
 
-			return new Header(scale, objectCount, mapName, leftStereoFileName, rightStereoFileName);
+			return new Header(scale, featuresCount, mapName, leftStereoFileName, rightStereoFileName);
 		}
 
-		private static void ReadLayerList(BinaryReader reader)
+		private static LayerLists ReadLayerLists(BinaryReader reader)
 		{
-			// List size in bytes
+			// TODO: use size to check count of bytes read
+			// list size in bytes - 4-byte integer
 			uint size = reader.ReadUInt32();
 
-			// List header size in bytes
+			// list header size in bytes - 4-byte integer
 			uint headerSize = reader.ReadUInt32();
-			if (headerSize != 13) throw new System.IO.InvalidDataException("Invalid file format: unsupported layer list header size");
+			if (headerSize != layerListHeaderSize)
+			{
+				throw new System.IO.InvalidDataException("Invalid file format: unsupported layer list header size");
+			}
 
-			// Normal layers count
+			// normal layers count - 4-byte integer
 			uint layersCount = reader.ReadUInt32();
 
-			// Reserved
-			int status = reader.ReadInt32();
+			// status - 4-byte integer - reserved
+			reader.ReadInt32();
 
-			// Service layers count
+			// service layers count
 			uint serviceLayersCount = (uint)(-reader.ReadInt32());
-			// First service layer number
+			// first service layer number
 			int firstServiceLayerNumber = -(int)serviceLayersCount + 1;
 
-			// Reserved
+			// reserved - 1 byte
 			reader.ReadByte();
 
-			IDictionary<int, int> layerIDs = new Dictionary<int, int>((int)(layersCount + serviceLayersCount));
-			IDictionary<int, Status> layerVisibility = new Dictionary<int, Status>((int)(layersCount + serviceLayersCount));
-
-			for (int layerNumber = firstServiceLayerNumber; layerNumber <= layersCount; layerNumber++)
+			IList<LayerInfo> serviceLayers = new List<LayerInfo>();
+			for (int layerNumber = firstServiceLayerNumber; layerNumber <= 0; layerNumber++)
 			{
-				// Layer descriptor size in bytes
-				uint layerDescriptorSize = reader.ReadUInt32();
-
-				// Layer status
-				int layerStatus = reader.ReadInt32();
-
-				// !! Add to array of visibility status
-				layerVisibility[layerNumber] = (Status)((layerStatus >> 16) & 0xFF);
-
-				// Layer ID
-				int layerID = reader.ReadInt32();
-
-				// !! Add to array of IDs
-				layerIDs[layerNumber] = layerID;
-
-				// Min scale
-				int minScale = reader.ReadInt32();
-
-				// Max scale
-				int maxScale = reader.ReadInt32();
-
-				// Pen color
-				int penColor = reader.ReadInt32();
-
-				// Pen width
-				int penWidth = reader.ReadInt32();
-
-				// Brush color
-				int brushColor = reader.ReadInt32();
-
-				// Font color
-				int fontColor = reader.ReadInt32();
-
-				// Font size
-				int fontSize = reader.ReadInt32();
-
-				// Pen style
-				byte penStyle = reader.ReadByte();
-
-				// Brush style
-				byte brushStyle = reader.ReadByte();
-
-				// Font style
-				byte fontStyle = reader.ReadByte();
-
-				// Layer name
-				string layerName = reader.ReadShortString();
-
-				// Font name
-				string fontName = reader.ReadShortString();
-
-				// Reserved
-				reader.ReadInt32();
-
-				// Parameter bit array length
-				uint parameterAvailableLength = reader.ReadUInt32();
-
-				// Parameters bit array
-				BitArray parameterAvailable = new BitArray(reader.ReadBytes((int)(parameterAvailableLength)));
-
-				// Layer's symbol number in symbol library
-				uint symbolNumber = reader.ReadUInt32();
-
-				// Reserved
-				string format = reader.ReadShortString();
-
-				// Layer reference counter
-				uint layerReferenceCounter = reader.ReadUInt32();
-
-				uint penWidth100 = reader.ReadUInt32();
-				uint fontSize10 = reader.ReadUInt32();
-
-				// HACK: skip other data
-				byte[] otherData = reader.ReadBytes(48);
-
-				if ((int)layerDescriptorSize != (
-					63 +
-					layerName.Length + 1 +
-					fontName.Length + 1 +
-					format.Length + 1 +
-					(int)(parameterAvailableLength) +
-					otherData.Length))
-					throw new System.IO.InvalidDataException("Invalid file format: invalid layer descriptor size or content");
+				serviceLayers.Add(ReadLayer(reader));
 			}
+
+			IList<LayerInfo> layers = new List<LayerInfo>();
+			for (int layerNumber = 1; layerNumber <= layersCount; layerNumber++)
+			{
+				layers.Add(ReadLayer(reader));
+			}
+
+			return new LayerLists(layers, serviceLayers);
 		}
 
-		private static void ReadParameterList(BinaryReader reader)
+		private static LayerInfo ReadLayer(BinaryReader reader)
 		{
-			// List size in bytes
-			uint size = reader.ReadUInt32();
+			LayerInfo layerInfo = new LayerInfo();
 
-			// List header size in bytes
-			uint headerSize = reader.ReadUInt32();
-			if (headerSize != 13) throw new System.IO.InvalidDataException("Invalid file format: unsupported parameter list header size");
+			// layer descriptor size in bytes - 4-byte integer
+			uint layerDescriptorSize = reader.ReadUInt32();
 
-			// Normal parameters count
-			uint parametersCount = reader.ReadUInt32();
-
-			// Reserved
-			int status = reader.ReadInt32();
-
-			// Service parameters count
-			uint serviceParametersCount = (uint)(-reader.ReadInt32());
-			// First service parameter number
-			int firstServiceParameterNumber = -(int)serviceParametersCount + 1;
-
-			// Reserved
+			// layer status - 4-byte integer
+			bool isPolygon = (reader.ReadByte() & (byte)1) == 1;
 			reader.ReadByte();
-
-			for (int parameterNumber = firstServiceParameterNumber; parameterNumber <= parametersCount; parameterNumber++)
+			switch (reader.ReadByte())
 			{
-				// Parameter descriptor size in bytes
-				uint parameterDescriptorSize = reader.ReadUInt32();
-				reader.ReadBytes((int)parameterDescriptorSize);
+				case 0:
+				{
+					layerInfo.State = State.Editable;
+					break;
+				}
+				case 1:
+				{
+					layerInfo.State = State.Markable;
+					break;
+				}
+				case 2:
+				{
+					layerInfo.State = State.Visible;
+					break;
+				}
+				case 3:
+				{
+					layerInfo.State = State.Invisible;
+					break;
+				}
+				default:
+				{
+					throw new System.IO.InvalidDataException("Invalid file content: unsupported layer state");
+				}
 			}
-		}
+			switch (reader.ReadByte())
+			{
+				case 1:
+				{
+					if (isPolygon)
+					{
+						layerInfo.ObjectsType = Layer.LayerObjectsType.Polygon;
+					}
+					else
+					{
+						layerInfo.ObjectsType = Layer.LayerObjectsType.Polyline;
+					}
+					break;
+				}
+				case 2:
+				{
+					if (isPolygon)
+					{
+						layerInfo.ObjectsType = Layer.LayerObjectsType.SmoothPolygon;
+					}
+					else
+					{
+						layerInfo.ObjectsType = Layer.LayerObjectsType.SmoothPolyline;
+					}
+					break;
+				}
+				case 4:
+				{
+					layerInfo.ObjectsType = Layer.LayerObjectsType.Symbol;
+					break;
+				}
+				case 0: case 3: case 5: case 6: case 7: case 8:
+				{
+					layerInfo.ObjectsType = Layer.LayerObjectsType.Unknown;
+					break;
+				}
+				default:
+				{
+					throw new System.IO.InvalidDataException("Invalid file content: unsupported layer objects type");
+				}
+			}
 
-		private static void ReadSymbolPrimitive(BinaryReader reader)
-		{
-			char kind = (char)reader.ReadByte();
-			
-			byte group = reader.ReadByte();
+			// layer ID - 4-byte integer
+			layerInfo.Id = reader.ReadInt32();
 
+			// min scale - 4-byte integer
+			layerInfo.MinScale = reader.ReadInt32();
+
+			// max scale - 4-byte integer
+			layerInfo.MaxScale = reader.ReadInt32();
+
+			// pen color - 4-byte integer
+			int penColor = reader.ReadInt32();
+
+			// pen width - 4-byte integer
+			int penWidth = reader.ReadInt32();
+
+			// brush color - 4-byte integer
+			int brushColor = reader.ReadInt32();
+
+			// font color - 4-byte integer - reserved
+			reader.ReadInt32();
+
+			// font size - 4-byte integer - reserved
+			reader.ReadInt32();
+
+			// pen style - 1 byte
 			byte penStyle = reader.ReadByte();
 
+			// brush style - 1 byte
 			byte brushStyle = reader.ReadByte();
 
-			uint penColor = reader.ReadUInt32();
+			// font style - 1 byte - reserved
+			reader.ReadByte();
 
-			uint penWidth = reader.ReadUInt32();
+			// layer name
+			layerInfo.Name = reader.ReadShortString();
 
-			uint brushColor = reader.ReadUInt32();
+			// font name - reserved
+			string fontName = reader.ReadShortString();
+
+			// 4-byte integer - reserved
+			reader.ReadInt32();
+
+			// parameter bit array length - 4-byte integer
+			uint parametersArrayLength = reader.ReadUInt32();
+
+			// parameters bit array
+			layerInfo.Parameters = new BitArray(reader.ReadBytes((int)(parametersArrayLength)));
+
+			// layer's symbol number in symbol library - 4-byte integer
+			layerInfo.SymbolNumber = reader.ReadUInt32();
+
+			// format - reserved
+			string format = reader.ReadShortString();
+
+			// layer reference counter - 4-byte integer
+			reader.ReadUInt32();
+
+			// addition to pen width - 4-byte integer
+			int penWidth100 = reader.ReadInt32();
+
+			// addition to font size - 4-byte integer - reserved
+			reader.ReadInt32();
+
+			layerInfo.Pen = new Pen(penColor, (penWidth*10 + penWidth100), penStyle);
+			layerInfo.Brush = new Brush(brushColor, brushStyle);
+
+			uint bytesRead =
+				63u + // size of elements with fixed size
+				(uint)layerInfo.Name.Length + 1 +
+				(uint)fontName.Length + 1 +
+				(uint)format.Length + 1 +
+				parametersArrayLength;
+
+			if (layerDescriptorSize < bytesRead)
+			{
+				throw new System.IO.InvalidDataException("Invalid file format: invalid layer descriptor size or content");
+			}
+
+			// skip other data
+			byte[] otherData = reader.ReadBytes((int)(layerDescriptorSize - bytesRead));
+
+			return layerInfo;
+		}
+
+		private static ParameterLists ReadParameterLists(BinaryReader reader)
+		{
+			// TODO: use size to check count of bytes read
+			// list size in bytes - 4-byte integer
+			uint size = reader.ReadUInt32();
+
+			// list header size in bytes - 4-byte integer
+			uint headerSize = reader.ReadUInt32();
+			if (headerSize != parameterListHeaderSize)
+			{
+				throw new System.IO.InvalidDataException("Invalid file format: unsupported parameter list header size");
+			}
+
+			// normal parameters count - 4-byte integer
+			uint parametersCount = reader.ReadUInt32();
+
+			// status - 4-byte integer - reserved
+			reader.ReadInt32();
+
+			// service parameters count - 4-byte integer
+			uint serviceParametersCount = (uint)(-reader.ReadInt32());
+			// first service parameter number
+			int firstServiceParameterNumber = -(int)serviceParametersCount + 1;
+
+			// reserved - 4-byte integer
+			reader.ReadByte();
+
+			IList<ParameterInfo> serviceParameters = new List<ParameterInfo>();
+			for (int parameterNumber = firstServiceParameterNumber; parameterNumber <= 0; parameterNumber++)
+			{
+				serviceParameters.Add(ReadParameter(reader));
+			}
+
+			IList<ParameterInfo> parameters = new List<ParameterInfo>();
+			for (int parameterNumber = 1; parameterNumber <= parametersCount; parameterNumber++)
+			{
+				parameters.Add(ReadParameter(reader));
+			}
+
+			return new ParameterLists(parameters, serviceParameters);
+		}
+
+		private static ParameterInfo ReadParameter(BinaryReader reader)
+		{
+			ParameterInfo parameterInfo = new ParameterInfo();
+
+			// parameter descriptor size in bytes - 4-byte integer
+			uint parameterDescriptorSize = reader.ReadUInt32();
+
+			// parameter status - 4-byte integer
+			reader.ReadBytes(2);
+
+			parameterInfo.State = State.Unknown;
+			switch (reader.ReadByte())
+			{
+				case 0:
+				{
+					parameterInfo.State = State.Editable;
+					break;
+				}
+				case 1:
+				{
+					parameterInfo.State = State.Markable;
+					break;
+				}
+				case 2:
+				{
+					parameterInfo.State = State.Visible;
+					break;
+				}
+				case 3:
+				{
+					parameterInfo.State = State.Invisible;
+					break;
+				}
+				default:
+				{
+					throw new System.IO.InvalidDataException("Invalid file content: unsupported parameter state");
+				}
+			}
+
+			if (!valueTypeByCode.TryGetValue(reader.ReadByte(), out parameterInfo.ValueType))
+			{
+				throw new System.IO.InvalidDataException("Invalid file content: unsupported parameter value type");
+			}
+
+			// parameter ID - 4-byte integer
+			parameterInfo.Id = reader.ReadInt32();
+
+			// min scale - 4-byte integer
+			parameterInfo.MinScale = reader.ReadInt32();
+
+			// max scale - 4-byte integer
+			parameterInfo.MaxScale = reader.ReadInt32();
+
+			// pen color - 4-byte integer - reserved
+			reader.ReadInt32();
+
+			// pen width - 4-byte integer - reserved
+			reader.ReadInt32();
+
+			// brush color - 4-byte integer
+			int brushColor = reader.ReadInt32();
+
+			// font color - 4-byte integer
+			int fontColor = reader.ReadInt32();
+
+			// font size - 4-byte integer
+			int fontSize = reader.ReadInt32();
+
+			// pen style - 1 byte - reserved
+			reader.ReadByte();
+
+			// brush style - 1 byte
+			byte brushStyle = reader.ReadByte();
+
+			// font style - 1 byte
+			byte fontStyle = reader.ReadByte();
+
+			// parameter name
+			parameterInfo.Name = reader.ReadShortString();
+
+			// font name
+			string fontName = reader.ReadShortString();
+
+			// 4-byte integer - reserved
+			reader.ReadInt32();
+
+			// parameter bit array length - 4-byte integer - not in use
+			uint parametersArrayLength = reader.ReadUInt32();
+
+			// parameters bit array - not in use
+			reader.ReadBytes((int)(parametersArrayLength));
+
+			// parameter's symbol number in symbol library - 4-byte integer
+			parameterInfo.SymbolNumber = reader.ReadUInt32();
+
+			// format
+			parameterInfo.Format = reader.ReadShortString();
+
+			// parameter reference counter - 4-byte integer - reserved
+			reader.ReadUInt32();
+
+			// addition to pen width - 4-byte integer
+			int penWidth100 = reader.ReadInt32();
+
+			// addition to font size - 4-byte integer
+			int fontSize10 = reader.ReadInt32();
+
+			parameterInfo.Brush = new Brush(brushColor, brushStyle);
+			parameterInfo.Font = new Font(fontColor, (fontSize*10 + fontSize10), fontStyle, fontName);
+
+			uint bytesRead =
+				63u + // size of elements with fixed size
+				(uint)parameterInfo.Name.Length + 1 +
+				(uint)parameterInfo.Font.Name.Length + 1 +
+				(uint)parameterInfo.Format.Length + 1 +
+				parametersArrayLength;
+
+			if (parameterDescriptorSize < bytesRead)
+			{
+				throw new System.IO.InvalidDataException("Invalid file format: invalid parameter descriptor size or content");
+			}
+
+			// skip other data
+			byte[] otherData = reader.ReadBytes((int)(parameterDescriptorSize - bytesRead));
+
+			return parameterInfo;
+		}
+
+		private static IList<Symbol> ReadSymbolList(BinaryReader reader)
+		{
+			// TODO: use size to check count of bytes read
+			// list size in bytes - 4-byte integer
+			uint size = reader.ReadUInt32();
+
+			// symbols count - 4-byte integer
+			uint symbolsCount = reader.ReadUInt32();
+
+			List<Symbol> symbols = new List<Symbol>();
+			for (uint symbolNumber = 1; symbolNumber <= symbolsCount; symbolNumber++)
+			{
+				symbols.Add(ReadSymbol(reader));
+			}
+
+			return symbols;
+		}
+
+		private static Symbol ReadSymbol(BinaryReader reader)
+		{
+			// symbol descriptor size in bytes - 4-byte integer
+			uint symbolDescriptorSize = reader.ReadUInt32();
+
+			// symbol header size in bytes - 4-byte integer
+			uint headerSize = reader.ReadUInt32();
+			if (headerSize != symbolHeaderSize)
+			{
+				throw new System.IO.InvalidDataException("Invalid file format: unsupported symbol header size");
+			}
+
+			// id - 4-byte integer - reserved
+			reader.ReadUInt32();
+
+			// primitives count - 4-byte integer
+			uint primitivesCount = reader.ReadUInt32();
+
+			// symbol length (in micrometers) - 4-byte integer
+			uint length = reader.ReadUInt32();
+
+			// symbol type - 4-byte integer
+			Symbol.SymbolType type;
+			if (!symbolTypeByCode.TryGetValue(reader.ReadUInt32(), out type))
+			{
+				throw new System.IO.InvalidDataException("Invalid file content: unsupported symbol type");
+			}
+
+			// symbol height (in micrometers) - 4-byte integer
+			uint height = reader.ReadUInt32();
+
+			ISet<Symbol.Primitive> primitives = new HashSet<Symbol.Primitive>();
+			for (uint primitiveNumber = 0; primitiveNumber < primitivesCount; primitiveNumber++)
+			{
+				primitives.Add(ReadSymbolPrimitive(reader));
+			}
+
+			uint bytesRead =
+				headerSize + // size of elements with fixed size
+				primitiveSize * primitivesCount;
+
+			if (symbolDescriptorSize < bytesRead)
+			{
+				throw new System.IO.InvalidDataException("Invalid file format: invalid symbol descriptor size");
+			}
+
+			// skip other data
+			byte[] otherData = reader.ReadBytes((int)(symbolDescriptorSize - bytesRead));
+
+			return new Symbol(type, length, height, primitives);
+		}
+
+		private static Symbol.Primitive ReadSymbolPrimitive(BinaryReader reader)
+		{
+			// primitive type - 1-byte char
+			Symbol.Primitive.PrimitiveType type;
+			if (!primitiveTypeByCode.TryGetValue((char)reader.ReadByte(), out type))
+			{
+				throw new System.IO.InvalidDataException("Invalid file content: unsupported primitive type");
+			}
+
+			// primitive group number - 1-byte
+			byte groupNumber = reader.ReadByte();
+
+			// pen style - 1-byte
+			byte penStyle = reader.ReadByte();
+
+			// brush style - 1-byte
+			byte brushStyle = reader.ReadByte();
+
+			// pen color - 4-byte integer
+			int penColor = reader.ReadInt32();
+
+			// pen width - 4-byte integer
+			int penWidth = reader.ReadInt32();
+
+			// brush color - 4-byte integer
+			int brushColor = reader.ReadInt32();
 
 			int x1 = reader.ReadInt32();
 			int y1 = reader.ReadInt32();
 			int x2 = reader.ReadInt32();
 			int y2 = reader.ReadInt32();
+
+			return new Symbol.Primitive(
+				type,
+				groupNumber,
+				new Pen(penColor, penWidth, penStyle),
+				new Brush(brushColor, brushStyle),
+				new Point2D(x1, y1),
+				new Point2D(x2, y2));
 		}
 
-		private static void ReadSymbol(BinaryReader reader)
+		private static ICollection<FeatureInfo> ReadFeatureList(BinaryReader reader, uint featuresCount)
 		{
-			// Symbol size in bytes
-			uint size = reader.ReadUInt32();
+			ICollection<FeatureInfo> features = new List<FeatureInfo>();
 
-			// Symbol header size in bytes
+			for (int featureNumber = 0; featureNumber < featuresCount; featureNumber++)
+			{
+				features.Add(ReadFeature(reader));
+			}
+
+			return features;
+		}
+
+		private static FeatureInfo ReadFeature(BinaryReader reader)
+		{
+			FeatureInfo featureInfo = new FeatureInfo();
+
+			// object descriptor size in bytes - 4-byte integer
+			uint objectDescriptorSize = reader.ReadUInt32();
+
+			// point storage format - 2-byte integer - reserved
+			reader.ReadUInt16();
+
+			// header size - 4-byte integer
 			uint headerSize = reader.ReadUInt32();
-			if (headerSize != 24) throw new System.IO.InvalidDataException("Invalid file format: unsupported symbol header size");
-
-			uint id = reader.ReadUInt32();
-
-			uint primitivesCount = reader.ReadUInt32();
-
-			// Symbol length (in micrometers)
-			uint length = reader.ReadUInt32();
-
-			// Symbol kind
-			uint kind = reader.ReadUInt32();
-
-			// Symbol height (in micrometers)
-			uint height = reader.ReadUInt32();
-
-			for (uint primitiveNumber = 0; primitiveNumber < primitivesCount; primitiveNumber++)
+			if (headerSize != featureHeaderSize)
 			{
-				ReadSymbolPrimitive(reader);
+				throw new System.IO.InvalidDataException("Invalid file format: unsupported feature header size");
 			}
 
-			// HACK
-			reader.ReadBytes((int)primitivesCount);
-		}
+			// feature's points count - 4-byte integer
+			int pointsCount = reader.ReadInt32();
 
-		private static void ReadSymbolList(BinaryReader reader)
-		{
-			// List size in bytes
-			uint size = reader.ReadUInt32();
+			// layer id - 4-byte integer
+			featureInfo.LayerId = reader.ReadInt32();
 
-			uint symbolsCount = reader.ReadUInt32();
+			// kind - 4-byte integer - reserved
+			reader.ReadInt32();
 
-			for (uint symbolNumber = 1; symbolNumber <= symbolsCount; symbolNumber++)
+			// layer index in layers list - 4-byte integer
+			reader.ReadInt32();
+
+			// feature id - 4-byte integer
+			featureInfo.Id = reader.ReadInt32();
+
+			// feature status - 4-byte integer
+			if (!featureStatusByCode.TryGetValue(reader.ReadInt32(), out featureInfo.Status))
 			{
-				ReadSymbol(reader);
+				throw new System.IO.InvalidDataException("Invalid file content: unsupported feature status");
 			}
+
+			// where - 4-byte integer - reserved
+			reader.ReadInt32();
+
+			// feature scale - 4-byte single
+			featureInfo.Scale = reader.ReadSingle();
+
+			// group - 4-byte integer - reserved
+			reader.ReadInt32();
+
+			// parent - 4-byte integer - reserved
+			reader.ReadInt32();
+
+			// symbol orientation - 4-byte integer
+			featureInfo.SymbolOrientation = reader.ReadInt32();
+
+			// parameter string length - 4-byte integer
+			int parameterStringLength = reader.ReadInt32();
+			string parameterString = System.Text.Encoding.Default.GetString(reader.ReadBytes(parameterStringLength));
+
+			// parse parameter string
+			featureInfo.Parameters = ParseParameterString(parameterString);
+
+			// read coordinates
+			IList<Geometries.Coordinate> coordinates = new List<Geometries.Coordinate>();
+			
+			for (int pointNumber = 0; pointNumber < pointsCount; pointNumber++)
+			{
+				// point status - 4-byte integer
+				reader.ReadInt32();
+
+				double x = reader.ReadExtended();
+				double y = reader.ReadExtended();
+				double z = reader.ReadExtended();
+
+				coordinates.Add(new Geometries.Coordinate(x, y, z));
+			}
+
+			featureInfo.Coordinates = coordinates;
+
+			return featureInfo;
 		}
 
-		private static void ReadObjectList(BinaryReader reader, uint objectCount)
+		private static IDictionary<int, string> ParseParameterString(string parameterString)
 		{
-			for (int objectNumber = 0; objectNumber < objectCount; objectNumber++)
+			IDictionary<int, string> parameters = new Dictionary<int, string>();
+			int parameterNumber = 0;
+			string parameterValue = string.Empty;
+
+			int valuePosition = 0;
+			int labelPosition = 0;
+			int endPosition = 0;
+
+			int i = 0;
+			while (i < parameterString.Length)
 			{
-				// Object size in bytes
-				uint objectSize = reader.ReadUInt32();
-
-				// Unknown reserved 4 bytes!
-				int unknownReserved = reader.ReadInt32();
-
-				// Point storage format
-				ushort format = reader.ReadUInt16();
-
-				// Object's point count
-				int pointCount = reader.ReadInt32();
-
-				// LayerID - 4-byte integer
-				int layerID = reader.ReadInt32();
-
-				// Reserved (Kind)
-				int kind = reader.ReadInt32();
-
-				// Layer index in layer list
-				int layerIndex = reader.ReadInt32();
-
-				// Object id
-				int objectId = reader.ReadInt32();
-
-				// Object status:
-				// 1 - hidden, 2 - deleted, 4 - marked
-				int objectStatus = reader.ReadInt32();
-
-				// Reserved (Where)
-				int where = reader.ReadInt32();
-
-				// Object scale
-				int objectScale = reader.ReadInt32();
-
-				// Reserved (Group)
-				int group = reader.ReadInt32();
-
-				// Reserved (Parent)
-				int parent = reader.ReadInt32();
-
-				// Symbol orientation
-				int symbolOrientation = reader.ReadInt32();
-
-				// Parameter string
-				int parameterStringLength = reader.ReadInt32();
-				string parameterString = System.Text.Encoding.Default.GetString(reader.ReadBytes(parameterStringLength));
-
-				// Parse parameter string
-				IDictionary<int, string> parameters = new Dictionary<int, string>();
-
-				int i = 0;
-				while (i < parameterString.Length)
+				if (parameterString[i] == (char)(1))
 				{
-					if (parameterString[i] == (char)(1))
+					valuePosition = parameterString.IndexOf((char)(3), i + 1);
+					if (valuePosition < 0)
 					{
-						int splitterPosition = parameterString.IndexOf((char)(3), i + 1);
-						if (splitterPosition < 0) continue;
-						int endPosition = parameterString.IndexOf((char)(2), splitterPosition + 1);
-						if (endPosition < 0) endPosition = parameterString.Length;
-						int parameterNumber = int.Parse(parameterString.Substring(i + 1, splitterPosition - (i + 1)));
-						string parameterValue = parameterString.Substring(splitterPosition + 1, endPosition - (splitterPosition + 1));
-						parameters.Add(parameterNumber, parameterValue);
-						i = endPosition;
+						throw new System.IO.InvalidDataException("Invalid file format: invalid parameter string");
 					}
-					i++;
-				}
 
-				// Read coordinates
-				for (int pointNumber = 0; pointNumber < pointCount; pointNumber++)
-				{
-					// Point status
-					int pointStatus = reader.ReadInt32();
+					parameterNumber = int.Parse(parameterString.Substring(i + 1, valuePosition - (i + 1)));
 
-					double x = reader.ReadExtended();
-					double y = reader.ReadExtended();
-					double z = reader.ReadExtended();
+					// try to find label parameters start position
+					labelPosition = parameterString.IndexOf((char)(5), valuePosition + 1);
+					if (labelPosition < 0)
+					{
+						endPosition = parameterString.IndexOf((char)(2), valuePosition + 1);
+						if (endPosition < 0)
+						{
+							throw new System.IO.InvalidDataException("Invalid file format: invalid parameter string");
+						}
+
+						parameterValue = parameterString.Substring(valuePosition + 1, endPosition - (valuePosition + 1));
+					}
+					else
+					{
+						parameterValue = parameterString.Substring(valuePosition + 1, labelPosition - (valuePosition + 1));
+
+						// TODO: parse label parameters
+
+						endPosition = parameterString.IndexOf((char)(2), labelPosition + 1);
+						if (endPosition < 0)
+						{
+							throw new System.IO.InvalidDataException("Invalid file format: invalid parameter string");
+						}						
+					}
+
+					parameters.Add(parameterNumber, parameterValue);
+
+					i = endPosition;
 				}
+				i++;
 			}
+
+			return parameters;
 		}
+
+		// layer list header size in bytes
+		private static uint layerListHeaderSize = 13u;
+
+		// parameter list header size in bytes
+		private static uint parameterListHeaderSize = 13u;
+
+		// symbol header size in bytes
+		private static uint symbolHeaderSize = 24u;
+
+		// feature header size in bytes
+		private static uint featureHeaderSize = 44u;
+
+		// primitive size in bytes
+		private static uint primitiveSize = 32u;
+
+		private static IDictionary<byte, System.Type> valueTypeByCode = new Dictionary<byte, System.Type>()
+		{
+			{ 1, typeof(System.Byte) },
+			{ 2, typeof(System.Int16) },
+			{ 3, typeof(System.Int32) },
+			{ 4, typeof(System.Double) },
+			{ 5, typeof(System.String) },
+			{ 6, typeof(System.Boolean) }
+			//{ 7, typeof(System.String) },
+			//{ 8, typeof(List) },
+			//{ 9, typeof(Table) }
+		};
+
+		private static IDictionary<uint, Symbol.SymbolType> symbolTypeByCode = new Dictionary<uint, Symbol.SymbolType>()
+		{
+			{ 0, Symbol.SymbolType.Single },
+			{ 1, Symbol.SymbolType.Linear },
+			{ 2, Symbol.SymbolType.Areal },
+			{ 3, Symbol.SymbolType.LinearOriented },
+			{ 4, Symbol.SymbolType.LinearScalable },
+			{ 5, Symbol.SymbolType.Bilinear }
+		};
+
+		private static IDictionary<char, Symbol.Primitive.PrimitiveType> primitiveTypeByCode = new Dictionary<char, Symbol.Primitive.PrimitiveType>()
+		{
+			{ 'P', Symbol.Primitive.PrimitiveType.Polyline },
+			{ 'C', Symbol.Primitive.PrimitiveType.Circle },
+			{ 'R', Symbol.Primitive.PrimitiveType.Rectangle },
+			{ 'M', Symbol.Primitive.PrimitiveType.Semicircle }
+		};
+
+		private static IDictionary<int, Feature.FeatureStatus> featureStatusByCode = new Dictionary<int, Feature.FeatureStatus>()
+		{
+			{ 1, Feature.FeatureStatus.Hidden },
+			{ 2, Feature.FeatureStatus.Deleted },
+			{ 4, Feature.FeatureStatus.Marked }
+		};
+
+		private static IDictionary<System.Type, System.Func<string, object>> parsers = new Dictionary<System.Type, System.Func<string, object>>()
+		{
+			{ typeof(System.Byte), s => System.Byte.Parse(s) },
+			{ typeof(System.Int16), s => System.Int16.Parse(s) },
+			{ typeof(System.Int32), s => System.Int32.Parse(s) },
+			{ typeof(System.Double), s => System.Double.Parse(s) },
+			{ typeof(System.String), s => s },
+			{ typeof(System.Boolean), s => System.Boolean.Parse(s) }
+		};
 	}
 }
