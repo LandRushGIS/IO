@@ -17,13 +17,11 @@ namespace LandRush.IO.DMF
 			public Map(
 				string name,
 				double scale,
-				IList<Layer> layers,
-				IList<Layer> serviceLayers)
+				IList<Layer> layers)
 			{
 				this.name = name;
 				this.scale = scale;
 				this.layers = layers;
-				this.serviceLayers = serviceLayers;
 			}
 
 			public string Name
@@ -41,20 +39,15 @@ namespace LandRush.IO.DMF
 				get { return this.layers; }
 			}
 
-			public IList<Layer> ServiceLayers
-			{
-				get { return this.layers; }
-			}
-
 			private string name;
 			private double scale;
 			private IList<Layer> layers;
-			private IList<Layer> serviceLayers;
 		}
 
 		internal struct LayerInfo
 		{
 			public int Id;
+			public int Index;
 			public string Name;
 			public State State;
 			public int MinScale;
@@ -64,18 +57,6 @@ namespace LandRush.IO.DMF
 			public uint SymbolNumber;
 			public Layer.LayerObjectsType ObjectsType;
 			public BitArray Parameters;
-		}
-
-		internal struct LayerLists
-		{
-			public LayerLists(IList<LayerInfo> layers, IList<LayerInfo> serviceLayers)
-			{
-				this.Layers = layers;
-				this.ServiceLayers = serviceLayers;
-			}
-
-			public readonly IList<LayerInfo> Layers;
-			public readonly IList<LayerInfo> ServiceLayers;
 		}
 
 		internal struct ParameterInfo
@@ -106,20 +87,21 @@ namespace LandRush.IO.DMF
 
 		internal struct FeatureInfo
 		{
-			public int LayerId;
+			public int LayerIndex;
 			public int Id;
-			public Feature.FeatureStatus Status;
 			public float Scale;
 			public int SymbolOrientation;
-			public IList<Geometries.Coordinate> Coordinates;
+			public IList<IList<Geometries.Coordinate>> CoordinatesLists;
 			public IDictionary<int, string> Parameters;
+			public bool IsHidden;
+			public bool IsDeleted;
+			public bool IsMarked;
 		}
 
 		public static Map Read(Stream stream)
 		{
-			var signature = ReadSignature(stream);
-			if (signature.Version.Major != 1 ||
-				signature.Version.Minor != 10)
+			Signature signature = ReadSignature(stream);
+			if (!supportedVersions.Contains(signature.Version))
 			{
 				throw new System.NotSupportedException("Version " + signature.Version + " is not supported");
 			}
@@ -130,10 +112,14 @@ namespace LandRush.IO.DMF
 			using (var reader = new BinaryReader(inputStream))
 			{
 				Header header = ReadHeader(reader);
-				LayerLists layerLists = ReadLayerLists(reader);
-				ParameterLists parameterLists = ReadParameterLists(reader);
+				IList<LayerInfo> layersInfo = ReadLayerList(reader);
+				ParameterLists parameterLists = ReadParameterList(reader);
 				IList<Symbol> symbols = ReadSymbolList(reader);
-				ICollection<FeatureInfo> features = ReadFeatureList(reader, header.FeatureCount);
+				if (signature.Version.Equals(new Version(1, 15)))
+				{
+					ReadAccessPolicies(reader);
+				}
+				ICollection<FeatureInfo> featuresInfo = ReadFeatureList(reader, header.FeatureCount);
 
 				// create service parameter library
 				IList<Parameter> serviceParameters = new List<Parameter>();
@@ -148,7 +134,7 @@ namespace LandRush.IO.DMF
 						parameterInfo.MaxScale,
 						parameterInfo.Brush,
 						parameterInfo.Font,
-						symbols[(int)parameterInfo.SymbolNumber - 1],
+						parameterInfo.SymbolNumber > 0 ? symbols[(int)parameterInfo.SymbolNumber - 1] : null,
 						parameterInfo.Format));
 				}
 
@@ -165,7 +151,7 @@ namespace LandRush.IO.DMF
 						parameterInfo.MaxScale,
 						parameterInfo.Brush,
 						parameterInfo.Font,
-						symbols[(int)parameterInfo.SymbolNumber - 1],
+						parameterInfo.SymbolNumber > 0 ? symbols[(int)parameterInfo.SymbolNumber - 1] : null,
 						parameterInfo.Format));
 				}
 
@@ -173,34 +159,26 @@ namespace LandRush.IO.DMF
 				// TODO: the following code does not process layers containing objects that are not features
 				// TODO: thus such layers still will be contained in featuresByLayerId dictionary
 				// TODO: but their set of objects will be empty
-				IDictionary<int, ISet<Feature>> featuresByLayerId = new Dictionary<int, ISet<Feature>>();
-				foreach (FeatureInfo featureInfo in features)
+				IDictionary<int, ISet<Feature>> featuresByLayerIndex = new Dictionary<int, ISet<Feature>>();
+				foreach (FeatureInfo featureInfo in featuresInfo)
 				{
-					if (!featuresByLayerId.ContainsKey(featureInfo.LayerId))
+					if (!featuresByLayerIndex.ContainsKey(featureInfo.LayerIndex))
 					{
-						featuresByLayerId[featureInfo.LayerId] = new HashSet<Feature>();
+						featuresByLayerIndex[featureInfo.LayerIndex] = new HashSet<Feature>();
 					}
 
-					// figure out layer id of the feature
+					// figure out geometry type of the feature
 					Layer.LayerObjectsType geometryType = Layer.LayerObjectsType.Unknown;
-					for (int i = 0; i < layerLists.ServiceLayers.Count; i++)
+					for (int i = 0; i < layersInfo.Count; i++)
 					{
-						if (layerLists.ServiceLayers[i].Id == featureInfo.LayerId)
+						if (layersInfo[i].Index == featureInfo.LayerIndex)
 						{
-							geometryType = layerLists.ServiceLayers[i].ObjectsType;
-							break;
-						}
-					}
-					for (int i = 0; i < layerLists.Layers.Count; i++)
-					{
-						if (layerLists.Layers[i].Id == featureInfo.LayerId)
-						{
-							geometryType = layerLists.Layers[i].ObjectsType;
+							geometryType = layersInfo[i].ObjectsType;
 							break;
 						}
 					}
 
-					// set geometry type for the feature
+					// set geometry for the feature
 					if (geometryType != Layer.LayerObjectsType.Unknown)
 					{
 						Geometries.IGeometry geometry = null;
@@ -208,32 +186,64 @@ namespace LandRush.IO.DMF
 						{
 							case Layer.LayerObjectsType.Symbol:
 							{
-								if (featureInfo.Coordinates.Count != 1)
+								if ((featureInfo.CoordinatesLists.Count != 1) || (featureInfo.CoordinatesLists[0].Count != 1))
 								{
 									throw new System.IO.InvalidDataException("Invalid coordinates count for point feature");
 								}
-								geometry = new NetTopologySuite.Geometries.Point(featureInfo.Coordinates[0]);
+								geometry = new NetTopologySuite.Geometries.Point(featureInfo.CoordinatesLists[0][0]);
 								break;
 							}
 							case Layer.LayerObjectsType.Polyline:
 							case Layer.LayerObjectsType.SmoothPolyline:
 							{
-								Geometries.Coordinate[] coordinates = new Geometries.Coordinate[featureInfo.Coordinates.Count];
-								featureInfo.Coordinates.CopyTo(coordinates, 0);
-								geometry = new NetTopologySuite.Geometries.LineString(coordinates);
+								if (featureInfo.CoordinatesLists.Count == 1)
+								{
+									Geometries.Coordinate[] coordinates = new Geometries.Coordinate[featureInfo.CoordinatesLists[0].Count];
+									featureInfo.CoordinatesLists[0].CopyTo(coordinates, 0);
+									geometry = new NetTopologySuite.Geometries.LineString(coordinates);
+								}
+								else
+								{
+									NetTopologySuite.Geometries.LineString[] lineStrings = new NetTopologySuite.Geometries.LineString[featureInfo.CoordinatesLists.Count];
+									int i = 0;
+									foreach (IList<Geometries.Coordinate> coordinatesList in featureInfo.CoordinatesLists)
+									{
+										Geometries.Coordinate[] coordinates = new Geometries.Coordinate[coordinatesList.Count];
+										coordinatesList.CopyTo(coordinates, 0);
+										lineStrings[i] = new NetTopologySuite.Geometries.LineString(coordinates);
+										i++;
+									}
+									geometry = new NetTopologySuite.Geometries.MultiLineString(lineStrings);
+								}		
 								break;
 							}
 							case Layer.LayerObjectsType.Polygon:
 							case Layer.LayerObjectsType.SmoothPolygon:
 							{
 								// TODO: handle holes in polygones
-								Geometries.Coordinate[] coordinates = new Geometries.Coordinate[featureInfo.Coordinates.Count];
-								featureInfo.Coordinates.CopyTo(coordinates, 0);
-								Geometries.ILinearRing shell = new NetTopologySuite.Geometries.LinearRing(coordinates);
-								geometry = new NetTopologySuite.Geometries.Polygon(shell);
+								if (featureInfo.CoordinatesLists.Count == 1)
+								{
+									Geometries.Coordinate[] coordinates = new Geometries.Coordinate[featureInfo.CoordinatesLists[0].Count];
+									featureInfo.CoordinatesLists[0].CopyTo(coordinates, 0);
+									Geometries.ILinearRing shell = new NetTopologySuite.Geometries.LinearRing(coordinates);
+									geometry = new NetTopologySuite.Geometries.Polygon(shell);
+								}
+								else
+								{
+									NetTopologySuite.Geometries.Polygon[] polygons = new NetTopologySuite.Geometries.Polygon[featureInfo.CoordinatesLists.Count];
+									int i = 0;
+									foreach (IList<Geometries.Coordinate> coordinatesList in featureInfo.CoordinatesLists)
+									{
+										Geometries.Coordinate[] coordinates = new Geometries.Coordinate[coordinatesList.Count];
+										coordinatesList.CopyTo(coordinates, 0);
+										Geometries.ILinearRing shell = new NetTopologySuite.Geometries.LinearRing(coordinates);
+										polygons[i] = new NetTopologySuite.Geometries.Polygon(shell);
+										i++;
+									}
+									geometry = new NetTopologySuite.Geometries.MultiPolygon(polygons);
+								}
 								break;
 							}
-							// TODO: multigeometries support
 						}
 
 						// create parameter list for the feature
@@ -248,57 +258,24 @@ namespace LandRush.IO.DMF
 							parameterValues[parameter] = parsers[parameter.ValueType](parameterValueString.Value);
 						}
 
-						featuresByLayerId[featureInfo.LayerId].Add(new Feature(
+						featuresByLayerIndex[featureInfo.LayerIndex].Add(new Feature(
 							featureInfo.Id,
-							featureInfo.Status,
 							featureInfo.Scale,
 							featureInfo.SymbolOrientation,
 							geometry,
-							parameterValues));
+							parameterValues,
+							featureInfo.IsHidden,
+							featureInfo.IsDeleted,
+							featureInfo.IsMarked));
 					}
-				}
-
-				IList<Layer> serviceLayers = new List<Layer>();
-				foreach (LayerInfo layerInfo in layerLists.ServiceLayers)
-				{
-					ISet<Parameter> layerParameters = new HashSet<Parameter>();
-
-					for (int i = 0; i < 11; i++)
-					{
-						if (layerInfo.Parameters[i] == true)
-						{
-							layerParameters.Add(serviceParameters[i]);
-						}
-					}
-
-					for (int i = 11; i < layerInfo.Parameters.Count; i++)
-					{
-						if (layerInfo.Parameters[i] == true)
-						{
-							layerParameters.Add(parameters[i - 11]);
-						}
-					}
-
-					serviceLayers.Add(new Layer(
-						layerInfo.Id,
-						layerInfo.Name,
-						layerInfo.State,
-						layerInfo.MinScale,
-						layerInfo.MaxScale,
-						layerInfo.Pen,
-						layerInfo.Brush,
-						symbols[(int)layerInfo.SymbolNumber],
-						layerInfo.ObjectsType,
-						layerParameters,
-						featuresByLayerId[layerInfo.Id]));
 				}
 
 				IList<Layer> layers = new List<Layer>();
-				foreach (LayerInfo layerInfo in layerLists.ServiceLayers)
+				foreach (LayerInfo layerInfo in layersInfo)
 				{
 					ISet<Parameter> layerParameters = new HashSet<Parameter>();
 
-					for (int i = 0; i < 11; i++)
+					for (int i = 0; i < System.Math.Min(11, layerInfo.Parameters.Count); i++)
 					{
 						if (layerInfo.Parameters[i] == true)
 						{
@@ -316,19 +293,20 @@ namespace LandRush.IO.DMF
 
 					layers.Add(new Layer(
 						layerInfo.Id,
+						layerInfo.Index,
 						layerInfo.Name,
 						layerInfo.State,
 						layerInfo.MinScale,
 						layerInfo.MaxScale,
 						layerInfo.Pen,
 						layerInfo.Brush,
-						symbols[(int)layerInfo.SymbolNumber],
+						layerInfo.SymbolNumber > 0 ? symbols[(int)layerInfo.SymbolNumber - 1] : null,
 						layerInfo.ObjectsType,
 						layerParameters,
-						featuresByLayerId[layerInfo.Id]));
+						featuresByLayerIndex[layerInfo.Index]));
 				}
 
-				return new Map(header.Name, header.Scale, layers, serviceLayers);
+				return new Map(header.Name, header.Scale, layers);
 			}
 		}
 
@@ -391,7 +369,7 @@ namespace LandRush.IO.DMF
 			return new Header(scale, featuresCount, mapName, leftStereoFileName, rightStereoFileName);
 		}
 
-		private static LayerLists ReadLayerLists(BinaryReader reader)
+		private static IList<LayerInfo> ReadLayerList(BinaryReader reader)
 		{
 			// TODO: use size to check count of bytes read
 			// list size in bytes - 4-byte integer
@@ -418,24 +396,19 @@ namespace LandRush.IO.DMF
 			// reserved - 1 byte
 			reader.ReadByte();
 
-			IList<LayerInfo> serviceLayers = new List<LayerInfo>();
-			for (int layerNumber = firstServiceLayerNumber; layerNumber <= 0; layerNumber++)
-			{
-				serviceLayers.Add(ReadLayer(reader));
-			}
-
 			IList<LayerInfo> layers = new List<LayerInfo>();
-			for (int layerNumber = 1; layerNumber <= layersCount; layerNumber++)
+			for (int layerNumber = firstServiceLayerNumber; layerNumber <= layersCount; layerNumber++)
 			{
-				layers.Add(ReadLayer(reader));
+				layers.Add(ReadLayer(reader, layerNumber));
 			}
 
-			return new LayerLists(layers, serviceLayers);
+			return layers;
 		}
 
-		private static LayerInfo ReadLayer(BinaryReader reader)
+		private static LayerInfo ReadLayer(BinaryReader reader, int layerIndex)
 		{
 			LayerInfo layerInfo = new LayerInfo();
+			layerInfo.Index = layerIndex;
 
 			// layer descriptor size in bytes - 4-byte integer
 			uint layerDescriptorSize = reader.ReadUInt32();
@@ -596,7 +569,7 @@ namespace LandRush.IO.DMF
 			return layerInfo;
 		}
 
-		private static ParameterLists ReadParameterLists(BinaryReader reader)
+		private static ParameterLists ReadParameterList(BinaryReader reader)
 		{
 			// TODO: use size to check count of bytes read
 			// list size in bytes - 4-byte integer
@@ -815,7 +788,7 @@ namespace LandRush.IO.DMF
 			// symbol height (in micrometers) - 4-byte integer
 			uint height = reader.ReadUInt32();
 
-			ISet<Symbol.Primitive> primitives = new HashSet<Symbol.Primitive>();
+			IList<Symbol.Primitive> primitives = new List<Symbol.Primitive>();
 			for (uint primitiveNumber = 0; primitiveNumber < primitivesCount; primitiveNumber++)
 			{
 				primitives.Add(ReadSymbolPrimitive(reader));
@@ -877,6 +850,27 @@ namespace LandRush.IO.DMF
 				new Point2D(x2, y2));
 		}
 
+		private static void ReadAccessPolicies(BinaryReader reader)
+		{
+			// access policies list size in bytes - 4-byte integer
+			int size = reader.ReadInt32();
+
+			int recordSize = reader.ReadInt32();
+
+			int count = reader.ReadInt32();
+
+			if (size != ((recordSize * count) + 8))
+			{
+				throw new System.IO.InvalidDataException("Invalid file format: invalid access policy records");
+			}
+
+			// read and skip access policy records
+			for (int i = 0; i < count; i++)
+			{
+				reader.ReadBytes(recordSize);
+			}
+		}
+		
 		private static ICollection<FeatureInfo> ReadFeatureList(BinaryReader reader, uint featuresCount)
 		{
 			ICollection<FeatureInfo> features = new List<FeatureInfo>();
@@ -910,22 +904,22 @@ namespace LandRush.IO.DMF
 			int pointsCount = reader.ReadInt32();
 
 			// layer id - 4-byte integer
-			featureInfo.LayerId = reader.ReadInt32();
+			reader.ReadInt32();
 
 			// kind - 4-byte integer - reserved
 			reader.ReadInt32();
 
 			// layer index in layers list - 4-byte integer
-			reader.ReadInt32();
+			featureInfo.LayerIndex = reader.ReadInt32();
 
 			// feature id - 4-byte integer
 			featureInfo.Id = reader.ReadInt32();
 
 			// feature status - 4-byte integer
-			if (!featureStatusByCode.TryGetValue(reader.ReadInt32(), out featureInfo.Status))
-			{
-				throw new System.IO.InvalidDataException("Invalid file content: unsupported feature status");
-			}
+			int featureStatus = reader.ReadInt32();
+			featureInfo.IsHidden = (((featureStatus >> 1) & 1) == 1);
+			featureInfo.IsDeleted = (((featureStatus >> 2) & 1) == 1);
+			featureInfo.IsMarked = (((featureStatus >> 4) & 1) == 1);
 
 			// where - 4-byte integer - reserved
 			reader.ReadInt32();
@@ -950,7 +944,9 @@ namespace LandRush.IO.DMF
 			featureInfo.Parameters = ParseParameterString(parameterString);
 
 			// read coordinates
-			IList<Geometries.Coordinate> coordinates = new List<Geometries.Coordinate>();
+			IList<IList<Geometries.Coordinate>> coordinatesLists = new List<IList<Geometries.Coordinate>>();
+			List<Geometries.Coordinate> coordinatesList = new List<Geometries.Coordinate>();
+			coordinatesLists.Add(coordinatesList);
 			
 			for (int pointNumber = 0; pointNumber < pointsCount; pointNumber++)
 			{
@@ -960,11 +956,20 @@ namespace LandRush.IO.DMF
 				double x = reader.ReadExtended();
 				double y = reader.ReadExtended();
 				double z = reader.ReadExtended();
-
-				coordinates.Add(new Geometries.Coordinate(x, y, z));
+				
+				if (System.Math.Abs(x - breakSign) < 0.000001)
+				{
+					// create list for a new coordinate sequence
+					coordinatesList = new List<Geometries.Coordinate>();
+					coordinatesLists.Add(coordinatesList);
+				}
+				else
+				{
+					coordinatesList.Add(new Geometries.Coordinate(x, y, z));
+				}
 			}
 
-			featureInfo.Coordinates = coordinates;
+			featureInfo.CoordinatesLists = coordinatesLists;
 
 			return featureInfo;
 		}
@@ -1027,6 +1032,9 @@ namespace LandRush.IO.DMF
 			return parameters;
 		}
 
+		// sign of break between two components of multigeometry in coordinates list
+		private static double breakSign = -2684354.56;
+
 		// layer list header size in bytes
 		private static uint layerListHeaderSize = 13u;
 
@@ -1042,6 +1050,12 @@ namespace LandRush.IO.DMF
 		// primitive size in bytes
 		private static uint primitiveSize = 32u;
 
+		private static ISet<Version> supportedVersions = new HashSet<Version>
+		{
+			new Version(1, 10),
+			new Version(1, 15)
+		};
+		
 		private static IDictionary<byte, System.Type> valueTypeByCode = new Dictionary<byte, System.Type>()
 		{
 			{ 1, typeof(System.Byte) },
@@ -1070,14 +1084,8 @@ namespace LandRush.IO.DMF
 			{ 'P', Symbol.Primitive.PrimitiveType.Polyline },
 			{ 'C', Symbol.Primitive.PrimitiveType.Circle },
 			{ 'R', Symbol.Primitive.PrimitiveType.Rectangle },
-			{ 'M', Symbol.Primitive.PrimitiveType.Semicircle }
-		};
-
-		private static IDictionary<int, Feature.FeatureStatus> featureStatusByCode = new Dictionary<int, Feature.FeatureStatus>()
-		{
-			{ 1, Feature.FeatureStatus.Hidden },
-			{ 2, Feature.FeatureStatus.Deleted },
-			{ 4, Feature.FeatureStatus.Marked }
+			{ 'M', Symbol.Primitive.PrimitiveType.Semicircle },
+			{ 'L', Symbol.Primitive.PrimitiveType.Unsupported }
 		};
 
 		private static IDictionary<System.Type, System.Func<string, object>> parsers = new Dictionary<System.Type, System.Func<string, object>>()

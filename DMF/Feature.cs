@@ -5,38 +5,29 @@ namespace LandRush.IO.DMF
 {
 	public class Feature
 	{
-		public enum FeatureStatus
-		{
-			Unknown = 0,
-			Hidden = 1,
-			Deleted = 2,
-			Marked = 3
-		}
-
 		public Feature(
 			int id,
-			FeatureStatus status,
 			float scale,
 			int symbolOrientation,
 			Geometries.IGeometry geometry,
-			IDictionary<Parameter, object> parameterValues)
+			IDictionary<Parameter, object> parameterValues,
+			bool isHidden,
+			bool isDeleted,
+			bool isMarked)
 		{
 			this.id = id;
-			this.status = status;
 			this.scale = scale;
 			this.symbolOrientation = symbolOrientation;
 			this.geometry = geometry;
 			this.parameterValues = parameterValues;
+			this.isHidden = isHidden;
+			this.isDeleted = isDeleted;
+			this.isMarked = isMarked;
 		}
 
 		public int Id
 		{
 			get { return this.id; }
-		}
-
-		public FeatureStatus Status
-		{
-			get { return this.status; }
 		}
 
 		public float Scale
@@ -59,11 +50,28 @@ namespace LandRush.IO.DMF
 			return this.parameterValues[parameter];
 		}
 
+		public bool IsHidden
+		{
+			get { return this.isHidden; }
+		}
+
+		public bool IsDeleted
+		{
+			get { return this.isDeleted; }
+		}
+
+		public bool IsMarked
+		{
+			get { return this.isMarked; }
+		}
+
 		private int id;
-		private FeatureStatus status;
 		private float scale;
 		private int symbolOrientation;
 		private Geometries.IGeometry geometry;
 		private IDictionary<Parameter, object> parameterValues;
+		private bool isHidden;
+		private bool isDeleted;
+		private bool isMarked;
 	}
 }

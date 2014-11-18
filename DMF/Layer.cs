@@ -22,6 +22,7 @@ namespace LandRush.IO.DMF
 
 		public Layer(
 			int id,
+			int index,
 			string name,
 			State state,
 			int minScale,
@@ -34,6 +35,7 @@ namespace LandRush.IO.DMF
 			ISet<Feature> features)
 		{
 			this.id = id;
+			this.index = index;
 			this.name = name;
 			this.state = state;
 			this.minScale = minScale;
@@ -49,6 +51,11 @@ namespace LandRush.IO.DMF
 		public int Id
 		{
 			get { return this.id; }
+		}
+
+		public int Index
+		{
+			get { return this.index; }
 		}
 
 		public string Name
@@ -91,17 +98,18 @@ namespace LandRush.IO.DMF
 			get { return this.objectsType; }
 		}
 
-		IEnumerable<Parameter> GetParameters()
+		public IEnumerable<Parameter> Parameters
 		{
-			return this.parameters;
+			get { return this.parameters; }
 		}
 
-		IEnumerable<Feature> GetFeatures()
+		public IEnumerable<Feature> Features
 		{
-			return this.features;
+			get { return this.features; }
 		}
 
 		private int id;
+		private int index;
 		private string name;
 		private State state;
 		private int minScale;

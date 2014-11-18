@@ -12,7 +12,9 @@ namespace LandRush.IO.DMF
 				Polyline = 1,
 				Circle = 2,
 				Rectangle = 3,
-				Semicircle = 4
+				Semicircle = 4,
+				// primitive type with unknown purposes
+				Unsupported = 5
 			}
 
 			public Primitive(
@@ -48,7 +50,7 @@ namespace LandRush.IO.DMF
 
 			public Brush Brush
 			{
-				get { return this.Brush; }
+				get { return this.brush; }
 			}
 
 			public Point2D FirstPoint
@@ -84,7 +86,7 @@ namespace LandRush.IO.DMF
 			SymbolType type,
 			uint length,
 			uint height,
-			ISet<Primitive> primitives)
+			IList<Primitive> primitives)
 		{
 			this.type = type;
 			this.length = length;
@@ -115,6 +117,6 @@ namespace LandRush.IO.DMF
 		private SymbolType type;
 		private uint length;
 		private uint height;
-		private ISet<Primitive> primitives;
+		private IList<Primitive> primitives;
 	}
 }
