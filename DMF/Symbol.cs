@@ -109,7 +109,7 @@ namespace LandRush.IO.DMF
 			get { return this.height; }
 		}
 
-		public IEnumerable<Primitive> Primitives
+		public IList<Primitive> Primitives
 		{
 			get { return this.primitives; }
 		}

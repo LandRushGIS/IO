@@ -98,6 +98,187 @@ namespace LandRush.IO.DMF
 			public bool IsMarked;
 		}
 
+		private static Geometries.IPoint BuildPoint(IList<Geometries.Coordinate> coordinateList)
+		{
+			if (coordinateList.Count != 1)
+			{
+				throw new System.IO.InvalidDataException("Invalid feature geometry: at least 1 coordinate required to build point");
+			}
+
+			return new NetTopologySuite.Geometries.Point(coordinateList[0]);
+		}
+
+		private static Geometries.ILineString BuildLineString(IList<Geometries.Coordinate> coordinateList)
+		{
+			if (coordinateList.Count < 2)
+			{
+				throw new System.IO.InvalidDataException("Invalid feature geometry: at least 2 coordinates required to build line string");
+			}
+
+			Geometries.Coordinate[] coordinates = new Geometries.Coordinate[coordinateList.Count];
+			coordinateList.CopyTo(coordinates, 0);
+			return new NetTopologySuite.Geometries.LineString(coordinates);
+		}
+
+		private static Geometries.ILinearRing BuildLinearRing(IList<Geometries.Coordinate> coordinateList)
+		{
+			if (coordinateList.Count < 4)
+			{
+				throw new System.IO.InvalidDataException("Invalid feature geometry: at least 4 coordinates required to build linear ring");
+			}
+
+			Geometries.Coordinate[] coordinates = new Geometries.Coordinate[coordinateList.Count];
+			coordinateList.CopyTo(coordinates, 0);
+			return new NetTopologySuite.Geometries.LinearRing(coordinates);
+		}
+
+		// assumed that simple polygon is a polygon without holes
+		private static Geometries.IPolygon BuildSimplePolygon(IList<Geometries.Coordinate> coordinateList)
+		{
+			Geometries.ILinearRing shell = BuildLinearRing(coordinateList);
+			return new NetTopologySuite.Geometries.Polygon(shell);
+		}
+
+		private static Geometries.IMultiPoint BuildMultiPoint(IList<IList<Geometries.Coordinate>> coordinateLists)
+		{
+			Geometries.IPoint[] points = new Geometries.IPoint[coordinateLists.Count];
+			for (int i = 0; i < coordinateLists.Count; i++)
+			{
+				points[i] = BuildPoint(coordinateLists[i]);
+			}
+			return new NetTopologySuite.Geometries.MultiPoint(points);
+		}
+
+		private static Geometries.IMultiLineString BuildMultiLineString(IList<IList<Geometries.Coordinate>> coordinateLists)
+		{
+			Geometries.ILineString[] lineStrings = new Geometries.ILineString[coordinateLists.Count];
+			for (int i = 0; i < coordinateLists.Count; i++)
+			{
+				lineStrings[i] = BuildLineString(coordinateLists[i]);
+			}
+			return new NetTopologySuite.Geometries.MultiLineString(lineStrings);
+		}
+
+		// assumed that complex polygon is a multipolygon or a polygon with holes
+		private static Geometries.IGeometry BuildComplexPolygon(IList<IList<Geometries.Coordinate>> coordinateLists)
+		{
+			// create rings from coordinate lists
+			Geometries.ILinearRing[] rings = new Geometries.ILinearRing[coordinateLists.Count];
+			for (int i = 0; i < coordinateLists.Count; i++)
+			{
+				rings[i] = BuildLinearRing(coordinateLists[i]);
+			}
+
+			// build ring hierarchy
+			Dictionary<Geometries.ILinearRing, Geometries.ILinearRing> parentByRing = new Dictionary<Geometries.ILinearRing, Geometries.ILinearRing>();
+			for (int i = 0; i < rings.Length; i++)
+			{
+				for (int j = 0; j < rings.Length; j++)
+				{
+					Geometries.ILinearRing ringA = rings[i];
+					Geometries.ILinearRing ringB = rings[j];
+
+					if (!ringA.Equals(ringB) && new Polygon(ringA).Contains(new Polygon(ringB)))
+					{
+						parentByRing[ringB] = ringA;
+					}
+				}
+			}
+
+			// only leaf rings are holes, group them by parent ring
+			Dictionary<Geometries.ILinearRing, ISet<Geometries.ILinearRing>> holesByShell = new Dictionary<Geometries.ILinearRing, ISet<Geometries.ILinearRing>>();
+			List<Geometries.ILinearRing> ringsToHandle = new List<Geometries.ILinearRing>();
+			for (int i = 0; i < rings.Length; i++)
+			{
+				if (parentByRing.ContainsKey(rings[i]) && !parentByRing.ContainsValue(rings[i]))
+				{
+					Geometries.ILinearRing ring = rings[i];
+					Geometries.ILinearRing parent = parentByRing[ring];
+
+					if (!holesByShell.ContainsKey(parent))
+					{
+						holesByShell[parent] = new HashSet<Geometries.ILinearRing>();
+					}
+
+					holesByShell[parent].Add(ring);
+				}
+
+				ringsToHandle.Add(rings[i]);
+			}
+
+			// create a polygon for each of the shells
+			IList<Geometries.IPolygon> polygonList = new List<Geometries.IPolygon>();
+			foreach (var shell in holesByShell.Keys)
+			{
+				ISet<Geometries.ILinearRing> holeSet = holesByShell[shell];
+				Geometries.ILinearRing[] holes = new Geometries.ILinearRing[holeSet.Count];
+				holeSet.CopyTo(holes, 0);
+				polygonList.Add(new NetTopologySuite.Geometries.Polygon(shell, holes));
+
+				ringsToHandle.Remove(shell);
+				foreach (var hole in holes)
+				{
+					ringsToHandle.Remove(hole);
+				}
+			}
+
+			// create a simple polygon for each of the unhandled rings
+			foreach (var ring in ringsToHandle)
+			{
+				polygonList.Add(new NetTopologySuite.Geometries.Polygon(ring));
+			}
+
+			Geometries.IPolygon[] polygons = new Geometries.IPolygon[polygonList.Count];
+			polygonList.CopyTo(polygons, 0);
+			return new NetTopologySuite.Geometries.MultiPolygon(polygons);
+		}
+
+		private static Geometries.OgcGeometryType DetectGeometryType(IList<Geometries.Coordinate> coordinateList)
+		{
+			switch (coordinateList.Count)
+			{
+				case 1: return Geometries.OgcGeometryType.Point;
+				case 2: case 3: return Geometries.OgcGeometryType.LineString;
+				default:
+					// if first and last points in coordinate list are the same, we are dealing with polygon
+					// if not, it is just a polyline
+					return coordinateList[0].Equals(coordinateList[coordinateList.Count - 1]) ?
+						Geometries.OgcGeometryType.Polygon : Geometries.OgcGeometryType.LineString;
+			}
+		}
+
+		private static Geometries.IGeometry BuildGeometry(IList<IList<Geometries.Coordinate>> coordinateLists)
+		{
+			switch (coordinateLists.Count)
+			{
+				case 0: return null;
+				case 1:
+				{
+					IList<Geometries.Coordinate> coordinateList = coordinateLists[0];
+					switch (DetectGeometryType(coordinateList))
+					{
+						case Geometries.OgcGeometryType.Point: return BuildPoint(coordinateList);
+						case Geometries.OgcGeometryType.LineString: return BuildLineString(coordinateList);
+						case Geometries.OgcGeometryType.Polygon: return BuildSimplePolygon(coordinateList);
+					}
+					break;
+				}
+				default:
+				{
+					IList<Geometries.Coordinate> firstCoordinateList = coordinateLists[0];
+					switch (DetectGeometryType(firstCoordinateList))
+					{
+						case Geometries.OgcGeometryType.Point: return BuildMultiPoint(coordinateLists);
+						case Geometries.OgcGeometryType.LineString: return BuildMultiLineString(coordinateLists);
+						case Geometries.OgcGeometryType.Polygon: return BuildComplexPolygon(coordinateLists);
+					}
+					break;
+				}
+			}
+
+			throw new System.InvalidOperationException("Error building feature geometry");
+		}
+
 		public static Map Read(Stream stream)
 		{
 			Signature signature = ReadSignature(stream);
@@ -158,7 +339,7 @@ namespace LandRush.IO.DMF
 				// sort features by layers
 				// TODO: the following code does not process layers containing objects that are not features
 				// TODO: thus such layers still will be contained in featuresByLayerId dictionary
-				// TODO: but their set of objects will be empty
+				// TODO: but their set of features will not exist
 				IDictionary<int, ISet<Feature>> featuresByLayerIndex = new Dictionary<int, ISet<Feature>>();
 				foreach (FeatureInfo featureInfo in featuresInfo)
 				{
@@ -167,85 +348,10 @@ namespace LandRush.IO.DMF
 						featuresByLayerIndex[featureInfo.LayerIndex] = new HashSet<Feature>();
 					}
 
-					// figure out geometry type of the feature
-					Layer.LayerObjectsType geometryType = Layer.LayerObjectsType.Unknown;
-					for (int i = 0; i < layersInfo.Count; i++)
-					{
-						if (layersInfo[i].Index == featureInfo.LayerIndex)
-						{
-							geometryType = layersInfo[i].ObjectsType;
-							break;
-						}
-					}
-
 					// set geometry for the feature
-					if (geometryType != Layer.LayerObjectsType.Unknown)
+					Geometries.IGeometry geometry = BuildGeometry(featureInfo.CoordinatesLists);
+					if (geometry != null)
 					{
-						Geometries.IGeometry geometry = null;
-						switch (geometryType)
-						{
-							case Layer.LayerObjectsType.Symbol:
-							{
-								if ((featureInfo.CoordinatesLists.Count != 1) || (featureInfo.CoordinatesLists[0].Count != 1))
-								{
-									throw new System.IO.InvalidDataException("Invalid coordinates count for point feature");
-								}
-								geometry = new NetTopologySuite.Geometries.Point(featureInfo.CoordinatesLists[0][0]);
-								break;
-							}
-							case Layer.LayerObjectsType.Polyline:
-							case Layer.LayerObjectsType.SmoothPolyline:
-							{
-								if (featureInfo.CoordinatesLists.Count == 1)
-								{
-									Geometries.Coordinate[] coordinates = new Geometries.Coordinate[featureInfo.CoordinatesLists[0].Count];
-									featureInfo.CoordinatesLists[0].CopyTo(coordinates, 0);
-									geometry = new NetTopologySuite.Geometries.LineString(coordinates);
-								}
-								else
-								{
-									NetTopologySuite.Geometries.LineString[] lineStrings = new NetTopologySuite.Geometries.LineString[featureInfo.CoordinatesLists.Count];
-									int i = 0;
-									foreach (IList<Geometries.Coordinate> coordinatesList in featureInfo.CoordinatesLists)
-									{
-										Geometries.Coordinate[] coordinates = new Geometries.Coordinate[coordinatesList.Count];
-										coordinatesList.CopyTo(coordinates, 0);
-										lineStrings[i] = new NetTopologySuite.Geometries.LineString(coordinates);
-										i++;
-									}
-									geometry = new NetTopologySuite.Geometries.MultiLineString(lineStrings);
-								}		
-								break;
-							}
-							case Layer.LayerObjectsType.Polygon:
-							case Layer.LayerObjectsType.SmoothPolygon:
-							{
-								// TODO: handle holes in polygones
-								if (featureInfo.CoordinatesLists.Count == 1)
-								{
-									Geometries.Coordinate[] coordinates = new Geometries.Coordinate[featureInfo.CoordinatesLists[0].Count];
-									featureInfo.CoordinatesLists[0].CopyTo(coordinates, 0);
-									Geometries.ILinearRing shell = new NetTopologySuite.Geometries.LinearRing(coordinates);
-									geometry = new NetTopologySuite.Geometries.Polygon(shell);
-								}
-								else
-								{
-									NetTopologySuite.Geometries.Polygon[] polygons = new NetTopologySuite.Geometries.Polygon[featureInfo.CoordinatesLists.Count];
-									int i = 0;
-									foreach (IList<Geometries.Coordinate> coordinatesList in featureInfo.CoordinatesLists)
-									{
-										Geometries.Coordinate[] coordinates = new Geometries.Coordinate[coordinatesList.Count];
-										coordinatesList.CopyTo(coordinates, 0);
-										Geometries.ILinearRing shell = new NetTopologySuite.Geometries.LinearRing(coordinates);
-										polygons[i] = new NetTopologySuite.Geometries.Polygon(shell);
-										i++;
-									}
-									geometry = new NetTopologySuite.Geometries.MultiPolygon(polygons);
-								}
-								break;
-							}
-						}
-
 						// create parameter list for the feature
 						IDictionary<Parameter, object> parameterValues = new Dictionary<Parameter, object>();
 						foreach (KeyValuePair<int, string> parameterValueString in featureInfo.Parameters)
@@ -303,7 +409,7 @@ namespace LandRush.IO.DMF
 						layerInfo.SymbolNumber > 0 ? symbols[(int)layerInfo.SymbolNumber - 1] : null,
 						layerInfo.ObjectsType,
 						layerParameters,
-						featuresByLayerIndex[layerInfo.Index]));
+						featuresByLayerIndex.ContainsKey(layerInfo.Index) ? featuresByLayerIndex[layerInfo.Index] : new HashSet<Feature>()));
 				}
 
 				return new Map(header.Name, header.Scale, layers);
@@ -481,7 +587,8 @@ namespace LandRush.IO.DMF
 				}
 				default:
 				{
-					throw new System.IO.InvalidDataException("Invalid file content: unsupported layer objects type");
+					layerInfo.ObjectsType = Layer.LayerObjectsType.Unknown;
+					break;
 				}
 			}
 
