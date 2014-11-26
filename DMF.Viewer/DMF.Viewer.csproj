@@ -37,5 +37,5 @@
       <HintPath>..\packages\NetTopologySuite.1.13.0\lib\net40-client\PowerCollections.dll</HintPath>
     </Reference>
   </ItemGroup>
-  <Import Project="..\..\common.props" />
+  <Import Project="..\common.props" />
 </Project>

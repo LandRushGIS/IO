@@ -45,5 +45,5 @@
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
-  <Import Project="..\..\common.props" />
+  <Import Project="..\common.props" />
 </Project>
