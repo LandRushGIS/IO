@@ -98,6 +98,16 @@ namespace LandRush.IO.DMF
 			public bool IsMarked;
 		}
 
+		internal struct PrimitiveRecord
+		{
+			public byte Type;
+			public byte GroupNumber;
+			public Pen Pen;
+			public Brush Brush;
+			public Point2D FirstPoint;
+			public Point2D SecondPoint;
+		}
+
 		private static Geometries.IPoint BuildPoint(IList<Geometries.Coordinate> coordinateList)
 		{
 			if (coordinateList.Count != 1)
@@ -237,13 +247,22 @@ namespace LandRush.IO.DMF
 		{
 			switch (coordinateList.Count)
 			{
-				case 1: return Geometries.OgcGeometryType.Point;
-				case 2: case 3: return Geometries.OgcGeometryType.LineString;
+				case 1:
+				{
+					return Geometries.OgcGeometryType.Point;
+				}
+				case 2:
+				case 3:
+				{
+					return Geometries.OgcGeometryType.LineString;
+				}
 				default:
-					// if first and last points in coordinate list are the same, we are dealing with polygon
-					// if not, it is just a polyline
+				// if first and last points in coordinate list are the same, we are dealing with polygon
+				// if not, it is just a polyline
+				{
 					return coordinateList[0].Equals(coordinateList[coordinateList.Count - 1]) ?
 						Geometries.OgcGeometryType.Polygon : Geometries.OgcGeometryType.LineString;
+				}
 			}
 		}
 
@@ -251,15 +270,27 @@ namespace LandRush.IO.DMF
 		{
 			switch (coordinateLists.Count)
 			{
-				case 0: return null;
+				case 0:
+				{
+					return null;
+				}
 				case 1:
 				{
 					IList<Geometries.Coordinate> coordinateList = coordinateLists[0];
 					switch (DetectGeometryType(coordinateList))
 					{
-						case Geometries.OgcGeometryType.Point: return BuildPoint(coordinateList);
-						case Geometries.OgcGeometryType.LineString: return BuildLineString(coordinateList);
-						case Geometries.OgcGeometryType.Polygon: return BuildSimplePolygon(coordinateList);
+						case Geometries.OgcGeometryType.Point:
+						{
+							return BuildPoint(coordinateList);
+						}
+						case Geometries.OgcGeometryType.LineString:
+						{
+							return BuildLineString(coordinateList);
+						}
+						case Geometries.OgcGeometryType.Polygon:
+						{
+							return BuildSimplePolygon(coordinateList);
+						}
 					}
 					break;
 				}
@@ -268,9 +299,18 @@ namespace LandRush.IO.DMF
 					IList<Geometries.Coordinate> firstCoordinateList = coordinateLists[0];
 					switch (DetectGeometryType(firstCoordinateList))
 					{
-						case Geometries.OgcGeometryType.Point: return BuildMultiPoint(coordinateLists);
-						case Geometries.OgcGeometryType.LineString: return BuildMultiLineString(coordinateLists);
-						case Geometries.OgcGeometryType.Polygon: return BuildComplexPolygon(coordinateLists);
+						case Geometries.OgcGeometryType.Point:
+						{
+							return BuildMultiPoint(coordinateLists);
+						}
+						case Geometries.OgcGeometryType.LineString:
+						{
+							return BuildMultiLineString(coordinateLists);
+						}
+						case Geometries.OgcGeometryType.Polygon:
+						{
+							return BuildComplexPolygon(coordinateLists);
+						}
 					}
 					break;
 				}
@@ -879,8 +919,8 @@ namespace LandRush.IO.DMF
 			// id - 4-byte integer - reserved
 			reader.ReadUInt32();
 
-			// primitives count - 4-byte integer
-			uint primitivesCount = reader.ReadUInt32();
+			// primitive records count - 4-byte integer
+			uint primitiveRecordsCount = reader.ReadUInt32();
 
 			// symbol length (in micrometers) - 4-byte integer
 			uint length = reader.ReadUInt32();
@@ -895,15 +935,11 @@ namespace LandRush.IO.DMF
 			// symbol height (in micrometers) - 4-byte integer
 			uint height = reader.ReadUInt32();
 
-			IList<Symbol.Primitive> primitives = new List<Symbol.Primitive>();
-			for (uint primitiveNumber = 0; primitiveNumber < primitivesCount; primitiveNumber++)
-			{
-				primitives.Add(ReadSymbolPrimitive(reader));
-			}
+			IList<Primitive> primitives = ReadSymbolPrimitives(reader, primitiveRecordsCount);
 
 			uint bytesRead =
 				headerSize + // size of elements with fixed size
-				primitiveSize * primitivesCount;
+				primitiveSize * primitiveRecordsCount;
 
 			if (symbolDescriptorSize < bytesRead)
 			{
@@ -916,45 +952,151 @@ namespace LandRush.IO.DMF
 			return new Symbol(type, length, height, primitives);
 		}
 
-		private static Symbol.Primitive ReadSymbolPrimitive(BinaryReader reader)
+		private static IList<PrimitiveRecord> ReadSymbolPrimitiveRecords(BinaryReader reader, uint primitiveRecordsCount)
 		{
-			// primitive type - 1-byte char
-			Symbol.Primitive.PrimitiveType type;
-			if (!primitiveTypeByCode.TryGetValue((char)reader.ReadByte(), out type))
+			IList<PrimitiveRecord> primitiveRecords = new List<PrimitiveRecord>();
+
+			for (uint primitiveRecordNumber = 0; primitiveRecordNumber < primitiveRecordsCount; ++primitiveRecordNumber)
 			{
-				throw new System.IO.InvalidDataException("Invalid file content: unsupported primitive type");
+				PrimitiveRecord primitiveRecord = new PrimitiveRecord();
+
+				// primitive type - 1-byte char
+				primitiveRecord.Type = reader.ReadByte();
+
+				// primitive group number - 1-byte
+				primitiveRecord.GroupNumber = reader.ReadByte();
+
+				// pen style - 1-byte
+				byte penStyle = reader.ReadByte();
+
+				// brush style - 1-byte
+				byte brushStyle = reader.ReadByte();
+
+				// pen color - 4-byte integer
+				int penColor = reader.ReadInt32();
+
+				// pen width - 4-byte integer
+				int penWidth = reader.ReadInt32();
+
+				// brush color - 4-byte integer
+				int brushColor = reader.ReadInt32();
+
+				primitiveRecord.Pen = new Pen(penColor, penWidth, penStyle);
+				primitiveRecord.Brush = new Brush(brushColor, brushStyle);
+
+				int x1 = reader.ReadInt32();
+				int y1 = reader.ReadInt32();
+				int x2 = reader.ReadInt32();
+				int y2 = reader.ReadInt32();
+
+				primitiveRecord.FirstPoint = new Point2D(x1, y1);
+				primitiveRecord.FirstPoint = new Point2D(x2, y2);
+
+				primitiveRecords.Add(primitiveRecord);
 			}
 
-			// primitive group number - 1-byte
-			byte groupNumber = reader.ReadByte();
+			return primitiveRecords;
+		}
 
-			// pen style - 1-byte
-			byte penStyle = reader.ReadByte();
+		private static IList<Primitive> ReadSymbolPrimitives(BinaryReader reader, uint primitiveRecordsCount)
+		{
+			IList<PrimitiveRecord> primitiveRecords = ReadSymbolPrimitiveRecords(reader, primitiveRecordsCount);
 
-			// brush style - 1-byte
-			byte brushStyle = reader.ReadByte();
+			IList<Primitive> primitives = new List<Primitive>();
 
-			// pen color - 4-byte integer
-			int penColor = reader.ReadInt32();
+			int primitiveRecordNumber = 0;
+			while (primitiveRecordNumber < primitiveRecords.Count)
+			{
+				switch ((char)(primitiveRecords[primitiveRecordNumber].Type))
+				{
+					case 'R':
+					{
+						primitives.Add(new RectanglePrimitive(
+							primitiveRecords[primitiveRecordNumber].GroupNumber,
+							primitiveRecords[primitiveRecordNumber].Pen,
+							primitiveRecords[primitiveRecordNumber].Brush,
+							primitiveRecords[primitiveRecordNumber].FirstPoint,
+							primitiveRecords[primitiveRecordNumber].SecondPoint));
+						++primitiveRecordNumber;
+						break;
+					}
+					case 'C':
+					{
+						primitives.Add(new CirclePrimitive(
+							primitiveRecords[primitiveRecordNumber].GroupNumber,
+							primitiveRecords[primitiveRecordNumber].Pen,
+							primitiveRecords[primitiveRecordNumber].Brush,
+							primitiveRecords[primitiveRecordNumber].FirstPoint,
+							primitiveRecords[primitiveRecordNumber].SecondPoint));
+						++primitiveRecordNumber;
+						break;
+					}
+					case 'M':
+					{
+						primitives.Add(new SemicirclePrimitive(
+							primitiveRecords[primitiveRecordNumber].GroupNumber,
+							primitiveRecords[primitiveRecordNumber].Pen,
+							primitiveRecords[primitiveRecordNumber].Brush,
+							primitiveRecords[primitiveRecordNumber].FirstPoint,
+							primitiveRecords[primitiveRecordNumber].SecondPoint));
+						++primitiveRecordNumber;
+						break;
+					}
+					case 'P':
+					{
+						byte groupNumber = primitiveRecords[primitiveRecordNumber].GroupNumber;
+						Pen pen = primitiveRecords[primitiveRecordNumber].Pen;
+						Brush brush = primitiveRecords[primitiveRecordNumber].Brush;
+						IList<Point2D> polylinePoints = new List<Point2D>();
+						while (((char)(primitiveRecords[primitiveRecordNumber].Type) == 'P')
+							&& primitiveRecordNumber < primitiveRecordsCount)
+						{
+							PrimitiveRecord record = primitiveRecords[primitiveRecordNumber];
+							foreach (Point2D point in new Point2D[] { record.FirstPoint, record.SecondPoint })
+							{
+								if (point.X == primitivesBreakSign)
+								// end of the polyline
+								{
+									if (polylinePoints.Count > 1)
+									// valid polyline consists of more than 1 point
+									{
+										primitives.Add(new PolylinePrimitive(groupNumber, pen, brush, polylinePoints));
+									}
+									polylinePoints.Clear();
+								}
+								else
+								{
+									if (polylinePoints.Count == 0)
+									// start new primitive
+									{
+										groupNumber = record.GroupNumber;
+										pen = record.Pen;
+										brush = record.Brush;
+									}
+									polylinePoints.Add(point);
+								}
+							}
+							++primitiveRecordNumber;
+						}
+						if (polylinePoints.Count > 1)
+						{
+							primitives.Add(new PolylinePrimitive(groupNumber, pen, brush, polylinePoints));
+						}
+						break;
+					}
+					case 'L':
+					{
+						++primitiveRecordNumber;
+						break;
+					}
+					default:
+					{
+						throw new System.IO.InvalidDataException("Invalid file content: unknown primitive type");
+					}
+				}
+			}
 
-			// pen width - 4-byte integer
-			int penWidth = reader.ReadInt32();
-
-			// brush color - 4-byte integer
-			int brushColor = reader.ReadInt32();
-
-			int x1 = reader.ReadInt32();
-			int y1 = reader.ReadInt32();
-			int x2 = reader.ReadInt32();
-			int y2 = reader.ReadInt32();
-
-			return new Symbol.Primitive(
-				type,
-				groupNumber,
-				new Pen(penColor, penWidth, penStyle),
-				new Brush(brushColor, brushStyle),
-				new Point2D(x1, y1),
-				new Point2D(x2, y2));
+			return primitives;
 		}
 
 		private static void ReadAccessPolicies(BinaryReader reader)
@@ -1142,6 +1284,8 @@ namespace LandRush.IO.DMF
 		// sign of break between two components of multigeometry in coordinates list
 		private static double breakSign = -2684354.56;
 
+		private static int primitivesBreakSign = -268435456;
+
 		// layer list header size in bytes
 		private static uint layerListHeaderSize = 13u;
 
@@ -1184,15 +1328,6 @@ namespace LandRush.IO.DMF
 			{ 3, Symbol.SymbolType.LinearOriented },
 			{ 4, Symbol.SymbolType.LinearScalable },
 			{ 5, Symbol.SymbolType.Bilinear }
-		};
-
-		private static IDictionary<char, Symbol.Primitive.PrimitiveType> primitiveTypeByCode = new Dictionary<char, Symbol.Primitive.PrimitiveType>()
-		{
-			{ 'P', Symbol.Primitive.PrimitiveType.Polyline },
-			{ 'C', Symbol.Primitive.PrimitiveType.Circle },
-			{ 'R', Symbol.Primitive.PrimitiveType.Rectangle },
-			{ 'M', Symbol.Primitive.PrimitiveType.Semicircle },
-			{ 'L', Symbol.Primitive.PrimitiveType.Unsupported }
 		};
 
 		private static IDictionary<System.Type, System.Func<string, object>> parsers = new Dictionary<System.Type, System.Func<string, object>>()
