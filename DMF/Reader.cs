@@ -339,7 +339,7 @@ namespace LandRush.IO.DMF
 				// sort features by layers
 				// TODO: the following code does not process layers containing objects that are not features
 				// TODO: thus such layers still will be contained in featuresByLayerId dictionary
-				// TODO: but their set of features will not exist
+				// TODO: but their set of features does not exist
 				IDictionary<int, ISet<Feature>> featuresByLayerIndex = new Dictionary<int, ISet<Feature>>();
 				foreach (FeatureInfo featureInfo in featuresInfo)
 				{
@@ -617,10 +617,10 @@ namespace LandRush.IO.DMF
 			reader.ReadInt32();
 
 			// pen style - 1 byte
-			byte penStyle = reader.ReadByte();
+			Pen.PenStyle penStyle = (Pen.PenStyle)(reader.ReadByte());
 
 			// brush style - 1 byte
-			byte brushStyle = reader.ReadByte();
+			Brush.BrushStyle brushStyle = (Brush.BrushStyle)(reader.ReadByte());
 
 			// font style - 1 byte - reserved
 			reader.ReadByte();
@@ -655,8 +655,8 @@ namespace LandRush.IO.DMF
 			// addition to font size - 4-byte integer - reserved
 			reader.ReadInt32();
 
-			layerInfo.Pen = new Pen(penColor, (penWidth*10 + penWidth100), penStyle);
-			layerInfo.Brush = new Brush(brushColor, brushStyle);
+			layerInfo.Pen = new Pen(new Color(penColor), (penWidth*10 + penWidth100), penStyle);
+			layerInfo.Brush = new Brush(new Color(brushColor), brushStyle);
 
 			uint bytesRead =
 				63u + // size of elements with fixed size
@@ -790,16 +790,22 @@ namespace LandRush.IO.DMF
 			reader.ReadByte();
 
 			// brush style - 1 byte
-			byte brushStyle = reader.ReadByte();
+			Brush.BrushStyle brushStyle = (Brush.BrushStyle)(reader.ReadByte());
 
 			// font style - 1 byte
 			byte fontStyle = reader.ReadByte();
+			bool bold = ((fontStyle & 0x1) == 0x1);
+			bool italic = ((fontStyle & 0x2) == 0x2);
+			bool underline = ((fontStyle & 0x4) == 0x4);
+			bool strikeOut = ((fontStyle & 0x8) == 0x8);
 
 			// parameter name
 			parameterInfo.Name = reader.ReadShortString();
 
 			// font name
 			string fontName = reader.ReadShortString();
+			string[] nameParts = fontName.Split(':');
+			byte charSet = (nameParts.Length < 2) ? CharSets.Default : byte.Parse(nameParts[1]);
 
 			// 4-byte integer - reserved
 			reader.ReadInt32();
@@ -825,8 +831,16 @@ namespace LandRush.IO.DMF
 			// addition to font size - 4-byte integer
 			int fontSize10 = reader.ReadInt32();
 
-			parameterInfo.Brush = new Brush(brushColor, brushStyle);
-			parameterInfo.Font = new Font(fontColor, (fontSize*10 + fontSize10), fontStyle, fontName);
+			parameterInfo.Brush = new Brush(new Color(brushColor), brushStyle);
+			parameterInfo.Font = new Font(
+				bold,
+				italic,
+				underline,
+				strikeOut,
+				new Color(fontColor),
+				(fontSize*10 + fontSize10),
+				charSet,
+				nameParts[0]);
 
 			uint bytesRead =
 				63u + // size of elements with fixed size
@@ -929,10 +943,10 @@ namespace LandRush.IO.DMF
 			byte groupNumber = reader.ReadByte();
 
 			// pen style - 1-byte
-			byte penStyle = reader.ReadByte();
+			Pen.PenStyle penStyle = (Pen.PenStyle)(reader.ReadByte());
 
 			// brush style - 1-byte
-			byte brushStyle = reader.ReadByte();
+			Brush.BrushStyle brushStyle = (Brush.BrushStyle)(reader.ReadByte());
 
 			// pen color - 4-byte integer
 			int penColor = reader.ReadInt32();
@@ -951,8 +965,8 @@ namespace LandRush.IO.DMF
 			return new Symbol.Primitive(
 				type,
 				groupNumber,
-				new Pen(penColor, penWidth, penStyle),
-				new Brush(brushColor, brushStyle),
+				new Pen(new Color(penColor), penWidth, penStyle),
+				new Brush(new Color(brushColor), brushStyle),
 				new Point2D(x1, y1),
 				new Point2D(x2, y2));
 		}
