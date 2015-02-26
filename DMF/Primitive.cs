@@ -171,7 +171,7 @@ namespace LandRush.IO.DMF
 		{
 			get
 			{
-				return Math.Atan((this.firstPoint.Y - this.Centre.Y) / (this.firstPoint.X - this.Centre.X));
+				return Math.Atan2((this.firstPoint.Y - this.Centre.Y), (this.firstPoint.X - this.Centre.X));
 			}
 		}
 
