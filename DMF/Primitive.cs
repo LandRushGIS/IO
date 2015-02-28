@@ -60,7 +60,7 @@ namespace LandRush.IO.DMF
 
 		public Point2D LeftTopPoint
 		{
-			get { return this.LeftTopPoint; }
+			get { return this.leftTopPoint; }
 		}
 
 		public uint Width
@@ -171,7 +171,7 @@ namespace LandRush.IO.DMF
 		{
 			get
 			{
-				return Math.Atan2((this.firstPoint.Y - this.Centre.Y), (this.firstPoint.X - this.Centre.X));
+				return Math.Atan2((this.Centre.Y - this.firstPoint.Y), (this.Centre.X - this.firstPoint.X));
 			}
 		}
 
