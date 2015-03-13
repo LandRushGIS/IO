@@ -56,10 +56,10 @@ namespace LandRush.IO.DMF
 			public Brush Brush;
 			public uint SymbolNumber;
 			public Layer.LayerObjectsType ObjectsType;
-			public BitArray Parameters;
+			public BitArray Attributes;
 		}
 
-		internal struct ParameterInfo
+		internal struct AttributeInfo
 		{
 			public int Id;
 			public string Name;
@@ -73,16 +73,16 @@ namespace LandRush.IO.DMF
 			public string Format;
 		}
 
-		internal struct ParameterLists
+		internal struct AttributesLists
 		{
-			public ParameterLists(IList<ParameterInfo> parameters, IList<ParameterInfo> serviceParameters)
+			public AttributesLists(IList<AttributeInfo> attributes, IList<AttributeInfo> serviceAttributes)
 			{
-				this.Parameters = parameters;
-				this.ServiceParameters = serviceParameters;
+				this.Attributes = attributes;
+				this.ServiceAttributes = serviceAttributes;
 			}
 
-			public readonly IList<ParameterInfo> Parameters;
-			public readonly IList<ParameterInfo> ServiceParameters;
+			public readonly IList<AttributeInfo> Attributes;
+			public readonly IList<AttributeInfo> ServiceAttributes;
 		}
 
 		internal struct FeatureInfo
@@ -92,7 +92,7 @@ namespace LandRush.IO.DMF
 			public float Scale;
 			public int SymbolOrientation;
 			public IList<IList<Geometries.Coordinate>> CoordinatesLists;
-			public IDictionary<int, string> Parameters;
+			public IDictionary<int, string> Attributes;
 			public bool IsHidden;
 			public bool IsDeleted;
 			public bool IsMarked;
@@ -257,8 +257,8 @@ namespace LandRush.IO.DMF
 					return Geometries.OgcGeometryType.LineString;
 				}
 				default:
-				// if first and last points in coordinate list are the same, we are dealing with polygon
-				// if not, it is just a polyline
+				// if first and last points in coordinate list are the same, we are dealing with a polygon
+				// if not, it is a polyline
 				{
 					return coordinateList[0].Equals(coordinateList[coordinateList.Count - 1]) ?
 						Geometries.OgcGeometryType.Polygon : Geometries.OgcGeometryType.LineString;
@@ -334,7 +334,7 @@ namespace LandRush.IO.DMF
 			{
 				Header header = ReadHeader(reader);
 				IList<LayerInfo> layersInfo = ReadLayerList(reader);
-				ParameterLists parameterLists = ReadParameterList(reader);
+				AttributesLists attributesLists = ReadAttributesList(reader);
 				IList<Symbol> symbols = ReadSymbolList(reader);
 				if (signature.Version.Equals(new Version(1, 15)))
 				{
@@ -342,43 +342,43 @@ namespace LandRush.IO.DMF
 				}
 				ICollection<FeatureInfo> featuresInfo = ReadFeatureList(reader, header.FeatureCount);
 
-				// create service parameter library
-				IList<Parameter> serviceParameters = new List<Parameter>();
-				foreach (ParameterInfo parameterInfo in parameterLists.ServiceParameters)
+				// create service attributes library
+				IList<Attribute> serviceAttributes = new List<Attribute>();
+				foreach (AttributeInfo attributeInfo in attributesLists.ServiceAttributes)
 				{
-					serviceParameters.Add(new Parameter(
-						parameterInfo.Id,
-						parameterInfo.Name,
-						parameterInfo.ValueType,
-						parameterInfo.State,
-						parameterInfo.MinScale,
-						parameterInfo.MaxScale,
-						parameterInfo.Brush,
-						parameterInfo.Font,
-						parameterInfo.SymbolNumber > 0 ? symbols[(int)parameterInfo.SymbolNumber - 1] : null,
-						parameterInfo.Format));
+					serviceAttributes.Add(new Attribute(
+						attributeInfo.Id,
+						attributeInfo.Name,
+						attributeInfo.ValueType,
+						attributeInfo.State,
+						attributeInfo.MinScale,
+						attributeInfo.MaxScale,
+						attributeInfo.Brush,
+						attributeInfo.Font,
+						attributeInfo.SymbolNumber > 0 ? symbols[(int)attributeInfo.SymbolNumber - 1] : null,
+						attributeInfo.Format));
 				}
 
-				// create parameter library
-				IList<Parameter> parameters = new List<Parameter>();
-				foreach (ParameterInfo parameterInfo in parameterLists.Parameters)
+				// create attributes library
+				IList<Attribute> attributes = new List<Attribute>();
+				foreach (AttributeInfo attributeInfo in attributesLists.Attributes)
 				{
-					parameters.Add(new Parameter(
-						parameterInfo.Id,
-						parameterInfo.Name,
-						parameterInfo.ValueType,
-						parameterInfo.State,
-						parameterInfo.MinScale,
-						parameterInfo.MaxScale,
-						parameterInfo.Brush,
-						parameterInfo.Font,
-						parameterInfo.SymbolNumber > 0 ? symbols[(int)parameterInfo.SymbolNumber - 1] : null,
-						parameterInfo.Format));
+					attributes.Add(new Attribute(
+						attributeInfo.Id,
+						attributeInfo.Name,
+						attributeInfo.ValueType,
+						attributeInfo.State,
+						attributeInfo.MinScale,
+						attributeInfo.MaxScale,
+						attributeInfo.Brush,
+						attributeInfo.Font,
+						attributeInfo.SymbolNumber > 0 ? symbols[(int)attributeInfo.SymbolNumber - 1] : null,
+						attributeInfo.Format));
 				}
 
 				// sort features by layers
 				// TODO: the following code does not process layers containing objects that are not features
-				// TODO: thus such layers still will be contained in featuresByLayerId dictionary
+				// TODO: thus such layers are contained in featuresByLayerId dictionary
 				// TODO: but their set of features does not exist
 				IDictionary<int, ISet<Feature>> featuresByLayerIndex = new Dictionary<int, ISet<Feature>>();
 				foreach (FeatureInfo featureInfo in featuresInfo)
@@ -392,16 +392,16 @@ namespace LandRush.IO.DMF
 					Geometries.IGeometry geometry = BuildGeometry(featureInfo.CoordinatesLists);
 					if (geometry != null)
 					{
-						// create parameter list for the feature
-						IDictionary<Parameter, object> parameterValues = new Dictionary<Parameter, object>();
-						foreach (KeyValuePair<int, string> parameterValueString in featureInfo.Parameters)
+						// create attributes list for the feature
+						IDictionary<Attribute, object> attributeValues = new Dictionary<Attribute, object>();
+						foreach (KeyValuePair<int, string> attributeValueString in featureInfo.Attributes)
 						{
-							Parameter parameter =
-								parameterValueString.Key <= 0 ?
-									serviceParameters[parameterValueString.Key + serviceParameters.Count - 1] :
-									parameters[parameterValueString.Key - 1];			
+							Attribute attribute =
+								attributeValueString.Key <= 0 ?
+									serviceAttributes[attributeValueString.Key + serviceAttributes.Count - 1] :
+									attributes[attributeValueString.Key - 1];
 
-							parameterValues[parameter] = parsers[parameter.ValueType](parameterValueString.Value);
+							attributeValues[attribute] = parsers[attribute.ValueType](attributeValueString.Value);
 						}
 
 						featuresByLayerIndex[featureInfo.LayerIndex].Add(new Feature(
@@ -409,7 +409,7 @@ namespace LandRush.IO.DMF
 							featureInfo.Scale,
 							featureInfo.SymbolOrientation,
 							geometry,
-							parameterValues,
+							attributeValues,
 							featureInfo.IsHidden,
 							featureInfo.IsDeleted,
 							featureInfo.IsMarked));
@@ -419,21 +419,21 @@ namespace LandRush.IO.DMF
 				IList<Layer> layers = new List<Layer>();
 				foreach (LayerInfo layerInfo in layersInfo)
 				{
-					ISet<Parameter> layerParameters = new HashSet<Parameter>();
+					ISet<Attribute> layerAttributes = new HashSet<Attribute>();
 
-					for (int i = 0; i < System.Math.Min(11, layerInfo.Parameters.Count); i++)
+					for (int i = 0; i < System.Math.Min(11, layerInfo.Attributes.Count); i++)
 					{
-						if (layerInfo.Parameters[i] == true)
+						if (layerInfo.Attributes[i] == true)
 						{
-							layerParameters.Add(serviceParameters[i]);
+							layerAttributes.Add(serviceAttributes[i]);
 						}
 					}
 
-					for (int i = 11; i < layerInfo.Parameters.Count; i++)
+					for (int i = 11; i < layerInfo.Attributes.Count; i++)
 					{
-						if (layerInfo.Parameters[i] == true)
+						if (layerInfo.Attributes[i] == true)
 						{
-							layerParameters.Add(parameters[i - 11]);
+							layerAttributes.Add(attributes[i - 11]);
 						}
 					}
 
@@ -448,7 +448,7 @@ namespace LandRush.IO.DMF
 						layerInfo.Brush,
 						layerInfo.SymbolNumber > 0 ? symbols[(int)layerInfo.SymbolNumber - 1] : null,
 						layerInfo.ObjectsType,
-						layerParameters,
+						layerAttributes,
 						featuresByLayerIndex.ContainsKey(layerInfo.Index) ? featuresByLayerIndex[layerInfo.Index] : new HashSet<Feature>()));
 				}
 
@@ -674,13 +674,13 @@ namespace LandRush.IO.DMF
 			// 4-byte integer - reserved
 			reader.ReadInt32();
 
-			// parameter bit array length - 4-byte integer
-			uint parametersArrayLength = reader.ReadUInt32();
+			// attribute bit array length - 4-byte integer
+			uint attributesArrayLength = reader.ReadUInt32();
 
-			// parameters bit array
-			layerInfo.Parameters = new BitArray(reader.ReadBytes((int)(parametersArrayLength)));
+			// attributes bit array
+			layerInfo.Attributes = new BitArray(reader.ReadBytes((int)(attributesArrayLength)));
 
-			// layer's symbol number in symbol library - 4-byte integer
+			// layer symbol number in symbols library - 4-byte integer
 			layerInfo.SymbolNumber = reader.ReadUInt32();
 
 			// format - reserved
@@ -703,7 +703,7 @@ namespace LandRush.IO.DMF
 				(uint)layerInfo.Name.Length + 1 +
 				(uint)fontName.Length + 1 +
 				(uint)format.Length + 1 +
-				parametersArrayLength;
+				attributesArrayLength;
 
 			if (layerDescriptorSize < bytesRead)
 			{
@@ -716,7 +716,7 @@ namespace LandRush.IO.DMF
 			return layerInfo;
 		}
 
-		private static ParameterLists ReadParameterList(BinaryReader reader)
+		private static AttributesLists ReadAttributesList(BinaryReader reader)
 		{
 			// TODO: use size to check count of bytes read
 			// list size in bytes - 4-byte integer
@@ -724,92 +724,92 @@ namespace LandRush.IO.DMF
 
 			// list header size in bytes - 4-byte integer
 			uint headerSize = reader.ReadUInt32();
-			if (headerSize != parameterListHeaderSize)
+			if (headerSize != attributesListHeaderSize)
 			{
-				throw new System.IO.InvalidDataException("Invalid file format: unsupported parameter list header size");
+				throw new System.IO.InvalidDataException("Invalid file format: unsupported attributes list header size");
 			}
 
-			// normal parameters count - 4-byte integer
-			uint parametersCount = reader.ReadUInt32();
+			// normal attributes count - 4-byte integer
+			uint attributesCount = reader.ReadUInt32();
 
 			// status - 4-byte integer - reserved
 			reader.ReadInt32();
 
-			// service parameters count - 4-byte integer
-			uint serviceParametersCount = (uint)(-reader.ReadInt32());
-			// first service parameter number
-			int firstServiceParameterNumber = -(int)serviceParametersCount + 1;
+			// service attributes count - 4-byte integer
+			uint serviceAttributesCount = (uint)(-reader.ReadInt32());
+			// first service attribute number
+			int firstServiceAttributeNumber = -(int)serviceAttributesCount + 1;
 
 			// reserved - 4-byte integer
 			reader.ReadByte();
 
-			IList<ParameterInfo> serviceParameters = new List<ParameterInfo>();
-			for (int parameterNumber = firstServiceParameterNumber; parameterNumber <= 0; parameterNumber++)
+			IList<AttributeInfo> serviceAttributes = new List<AttributeInfo>();
+			for (int attributeNumber = firstServiceAttributeNumber; attributeNumber <= 0; attributeNumber++)
 			{
-				serviceParameters.Add(ReadParameter(reader));
+				serviceAttributes.Add(ReadAttribute(reader));
 			}
 
-			IList<ParameterInfo> parameters = new List<ParameterInfo>();
-			for (int parameterNumber = 1; parameterNumber <= parametersCount; parameterNumber++)
+			IList<AttributeInfo> attributes = new List<AttributeInfo>();
+			for (int attributeNumber = 1; attributeNumber <= attributesCount; attributeNumber++)
 			{
-				parameters.Add(ReadParameter(reader));
+				attributes.Add(ReadAttribute(reader));
 			}
 
-			return new ParameterLists(parameters, serviceParameters);
+			return new AttributesLists(attributes, serviceAttributes);
 		}
 
-		private static ParameterInfo ReadParameter(BinaryReader reader)
+		private static AttributeInfo ReadAttribute(BinaryReader reader)
 		{
-			ParameterInfo parameterInfo = new ParameterInfo();
+			AttributeInfo attributeInfo = new AttributeInfo();
 
-			// parameter descriptor size in bytes - 4-byte integer
-			uint parameterDescriptorSize = reader.ReadUInt32();
+			// attribute descriptor size in bytes - 4-byte integer
+			uint attributeDescriptorSize = reader.ReadUInt32();
 
-			// parameter status - 4-byte integer
+			// attribute status - 4-byte integer
 			reader.ReadBytes(2);
 
-			parameterInfo.State = State.Unknown;
+			attributeInfo.State = State.Unknown;
 			switch (reader.ReadByte())
 			{
 				case 0:
 				{
-					parameterInfo.State = State.Editable;
+					attributeInfo.State = State.Editable;
 					break;
 				}
 				case 1:
 				{
-					parameterInfo.State = State.Markable;
+					attributeInfo.State = State.Markable;
 					break;
 				}
 				case 2:
 				{
-					parameterInfo.State = State.Visible;
+					attributeInfo.State = State.Visible;
 					break;
 				}
 				case 3:
 				{
-					parameterInfo.State = State.Invisible;
+					attributeInfo.State = State.Invisible;
 					break;
 				}
 				default:
 				{
-					throw new System.IO.InvalidDataException("Invalid file content: unsupported parameter state");
+					throw new System.IO.InvalidDataException("Invalid file content: unsupported attribute state");
 				}
 			}
 
-			if (!valueTypeByCode.TryGetValue(reader.ReadByte(), out parameterInfo.ValueType))
+			if (!valueTypeByCode.TryGetValue(reader.ReadByte(), out attributeInfo.ValueType))
 			{
-				throw new System.IO.InvalidDataException("Invalid file content: unsupported parameter value type");
+				throw new System.IO.InvalidDataException("Invalid file content: unsupported attribute value type");
 			}
 
-			// parameter ID - 4-byte integer
-			parameterInfo.Id = reader.ReadInt32();
+			// attribute ID - 4-byte integer
+			attributeInfo.Id = reader.ReadInt32();
 
 			// min scale - 4-byte integer
-			parameterInfo.MinScale = reader.ReadInt32();
+			attributeInfo.MinScale = reader.ReadInt32();
 
 			// max scale - 4-byte integer
-			parameterInfo.MaxScale = reader.ReadInt32();
+			attributeInfo.MaxScale = reader.ReadInt32();
 
 			// pen color - 4-byte integer - reserved
 			reader.ReadInt32();
@@ -839,8 +839,8 @@ namespace LandRush.IO.DMF
 			bool underline = ((fontStyle & 0x4) == 0x4);
 			bool strikeOut = ((fontStyle & 0x8) == 0x8);
 
-			// parameter name
-			parameterInfo.Name = reader.ReadShortString();
+			// attribute name
+			attributeInfo.Name = reader.ReadShortString();
 
 			// font name
 			string fontName = reader.ReadShortString();
@@ -850,19 +850,19 @@ namespace LandRush.IO.DMF
 			// 4-byte integer - reserved
 			reader.ReadInt32();
 
-			// parameter bit array length - 4-byte integer - not in use
-			uint parametersArrayLength = reader.ReadUInt32();
+			// attribute bit array length - 4-byte integer - not in use
+			uint attributesArrayLength = reader.ReadUInt32();
 
-			// parameters bit array - not in use
-			reader.ReadBytes((int)(parametersArrayLength));
+			// attributes bit array - not in use
+			reader.ReadBytes((int)(attributesArrayLength));
 
-			// parameter's symbol number in symbol library - 4-byte integer
-			parameterInfo.SymbolNumber = reader.ReadUInt32();
+			// attribute symbol number in symbols library - 4-byte integer
+			attributeInfo.SymbolNumber = reader.ReadUInt32();
 
 			// format
-			parameterInfo.Format = reader.ReadShortString();
+			attributeInfo.Format = reader.ReadShortString();
 
-			// parameter reference counter - 4-byte integer - reserved
+			// attribute reference counter - 4-byte integer - reserved
 			reader.ReadUInt32();
 
 			// addition to pen width - 4-byte integer
@@ -871,8 +871,8 @@ namespace LandRush.IO.DMF
 			// addition to font size - 4-byte integer
 			int fontSize10 = reader.ReadInt32();
 
-			parameterInfo.Brush = new Brush(new Color(brushColor), brushStyle);
-			parameterInfo.Font = new Font(
+			attributeInfo.Brush = new Brush(new Color(brushColor), brushStyle);
+			attributeInfo.Font = new Font(
 				bold,
 				italic,
 				underline,
@@ -884,20 +884,20 @@ namespace LandRush.IO.DMF
 
 			uint bytesRead =
 				63u + // size of elements with fixed size
-				(uint)parameterInfo.Name.Length + 1 +
-				(uint)parameterInfo.Font.Name.Length + 1 +
-				(uint)parameterInfo.Format.Length + 1 +
-				parametersArrayLength;
+				(uint)attributeInfo.Name.Length + 1 +
+				(uint)attributeInfo.Font.Name.Length + 1 +
+				(uint)attributeInfo.Format.Length + 1 +
+				attributesArrayLength;
 
-			if (parameterDescriptorSize < bytesRead)
+			if (attributeDescriptorSize < bytesRead)
 			{
-				throw new System.IO.InvalidDataException("Invalid file format: invalid parameter descriptor size or content");
+				throw new System.IO.InvalidDataException("Invalid file format: invalid attribute descriptor size or content");
 			}
 
 			// skip other data
-			byte[] otherData = reader.ReadBytes((int)(parameterDescriptorSize - bytesRead));
+			byte[] otherData = reader.ReadBytes((int)(attributeDescriptorSize - bytesRead));
 
-			return parameterInfo;
+			return attributeInfo;
 		}
 
 		private static IList<Symbol> ReadSymbolList(BinaryReader reader)
@@ -1163,7 +1163,7 @@ namespace LandRush.IO.DMF
 				throw new System.IO.InvalidDataException("Invalid file format: unsupported feature header size");
 			}
 
-			// feature's points count - 4-byte integer
+			// feature points count - 4-byte integer
 			int pointsCount = reader.ReadInt32();
 
 			// layer id - 4-byte integer
@@ -1199,12 +1199,12 @@ namespace LandRush.IO.DMF
 			// symbol orientation - 4-byte integer
 			featureInfo.SymbolOrientation = reader.ReadInt32();
 
-			// parameter string length - 4-byte integer
-			int parameterStringLength = reader.ReadInt32();
-			string parameterString = System.Text.Encoding.Default.GetString(reader.ReadBytes(parameterStringLength));
+			// attribute string length - 4-byte integer
+			int attributeStringLength = reader.ReadInt32();
+			string attributeString = System.Text.Encoding.Default.GetString(reader.ReadBytes(attributeStringLength));
 
-			// parse parameter string
-			featureInfo.Parameters = ParseParameterString(parameterString);
+			// parse attribute string
+			featureInfo.Attributes = ParseAttributeString(attributeString);
 
 			// read coordinates
 			IList<IList<Geometries.Coordinate>> coordinatesLists = new List<IList<Geometries.Coordinate>>();
@@ -1237,62 +1237,62 @@ namespace LandRush.IO.DMF
 			return featureInfo;
 		}
 
-		private static IDictionary<int, string> ParseParameterString(string parameterString)
+		private static IDictionary<int, string> ParseAttributeString(string attributeString)
 		{
-			IDictionary<int, string> parameters = new Dictionary<int, string>();
-			int parameterNumber = 0;
-			string parameterValue = string.Empty;
+			IDictionary<int, string> attributes = new Dictionary<int, string>();
+			int attributeNumber = 0;
+			string attributeValue = string.Empty;
 
 			int valuePosition = 0;
 			int labelPosition = 0;
 			int endPosition = 0;
 
 			int i = 0;
-			while (i < parameterString.Length)
+			while (i < attributeString.Length)
 			{
-				if (parameterString[i] == (char)(1))
+				if (attributeString[i] == (char)(1))
 				{
-					valuePosition = parameterString.IndexOf((char)(3), i + 1);
+					valuePosition = attributeString.IndexOf((char)(3), i + 1);
 					if (valuePosition < 0)
 					{
-						throw new System.IO.InvalidDataException("Invalid file format: invalid parameter string");
+						throw new System.IO.InvalidDataException("Invalid file format: invalid attribute string");
 					}
 
-					parameterNumber = int.Parse(parameterString.Substring(i + 1, valuePosition - (i + 1)));
+					attributeNumber = int.Parse(attributeString.Substring(i + 1, valuePosition - (i + 1)));
 
 					// try to find label parameters start position
-					labelPosition = parameterString.IndexOf((char)(5), valuePosition + 1);
+					labelPosition = attributeString.IndexOf((char)(5), valuePosition + 1);
 					if (labelPosition < 0)
 					{
-						endPosition = parameterString.IndexOf((char)(2), valuePosition + 1);
+						endPosition = attributeString.IndexOf((char)(2), valuePosition + 1);
 						if (endPosition < 0)
 						{
-							throw new System.IO.InvalidDataException("Invalid file format: invalid parameter string");
+							throw new System.IO.InvalidDataException("Invalid file format: invalid attribute string");
 						}
 
-						parameterValue = parameterString.Substring(valuePosition + 1, endPosition - (valuePosition + 1));
+						attributeValue = attributeString.Substring(valuePosition + 1, endPosition - (valuePosition + 1));
 					}
 					else
 					{
-						parameterValue = parameterString.Substring(valuePosition + 1, labelPosition - (valuePosition + 1));
+						attributeValue = attributeString.Substring(valuePosition + 1, labelPosition - (valuePosition + 1));
 
 						// TODO: parse label parameters
 
-						endPosition = parameterString.IndexOf((char)(2), labelPosition + 1);
+						endPosition = attributeString.IndexOf((char)(2), labelPosition + 1);
 						if (endPosition < 0)
 						{
-							throw new System.IO.InvalidDataException("Invalid file format: invalid parameter string");
+							throw new System.IO.InvalidDataException("Invalid file format: invalid attribute string");
 						}						
 					}
 
-					parameters.Add(parameterNumber, parameterValue);
+					attributes.Add(attributeNumber, attributeValue);
 
 					i = endPosition;
 				}
 				i++;
 			}
 
-			return parameters;
+			return attributes;
 		}
 
 		// sign of break between two components of multigeometry in coordinates list
@@ -1300,11 +1300,11 @@ namespace LandRush.IO.DMF
 
 		private static int primitivesBreakSign = -268435456;
 
-		// layer list header size in bytes
+		// layers list header size in bytes
 		private static uint layerListHeaderSize = 13u;
 
-		// parameter list header size in bytes
-		private static uint parameterListHeaderSize = 13u;
+		// attributes list header size in bytes
+		private static uint attributesListHeaderSize = 13u;
 
 		// symbol header size in bytes
 		private static uint symbolHeaderSize = 24u;

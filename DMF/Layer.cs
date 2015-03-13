@@ -31,7 +31,7 @@ namespace LandRush.IO.DMF
 			Brush brush,
 			Symbol symbol,
 			LayerObjectsType objectsType,
-			ISet<Parameter> parameters,
+			ISet<Attribute> attributes,
 			ISet<Feature> features)
 		{
 			this.id = id;
@@ -44,7 +44,7 @@ namespace LandRush.IO.DMF
 			this.brush = brush;
 			this.symbol = symbol;
 			this.objectsType = objectsType;
-			this.parameters = parameters;
+			this.attributes = attributes;
 			this.features = features;
 		}
 
@@ -98,9 +98,9 @@ namespace LandRush.IO.DMF
 			get { return this.objectsType; }
 		}
 
-		public IEnumerable<Parameter> Parameters
+		public IEnumerable<Attribute> Attributes
 		{
-			get { return this.parameters; }
+			get { return this.attributes; }
 		}
 
 		public IEnumerable<Feature> Features
@@ -118,7 +118,7 @@ namespace LandRush.IO.DMF
 		private Brush brush;
 		private Symbol symbol;
 		private LayerObjectsType objectsType;
-		private ISet<Parameter> parameters;
+		private ISet<Attribute> attributes;
 		private ISet<Feature> features;
 	}
 }

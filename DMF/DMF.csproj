@@ -15,6 +15,7 @@
     <BuildPackage>true</BuildPackage>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="AttributesTable.cs" />
     <Compile Include="BinaryReaderUtils.cs" />
     <Compile Include="Brush.cs" />
     <Compile Include="CharSets.cs" />
@@ -23,7 +24,7 @@
     <Compile Include="Font.cs" />
     <Compile Include="Header.cs" />
     <Compile Include="Layer.cs" />
-    <Compile Include="Parameter.cs" />
+    <Compile Include="Attribute.cs" />
     <Compile Include="Pen.cs" />
     <Compile Include="Point2D.cs" />
     <Compile Include="Primitive.cs" />

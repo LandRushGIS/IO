@@ -1,16 +1,17 @@
 ﻿using System.Collections.Generic;
 using Geometries = GeoAPI.Geometries;
+using NetTopologySuite.Features;
 
 namespace LandRush.IO.DMF
 {
-	public class Feature
+	public class Feature : IFeature
 	{
 		public Feature(
 			int id,
 			float scale,
 			int symbolOrientation,
 			Geometries.IGeometry geometry,
-			IDictionary<Parameter, object> parameterValues,
+			IDictionary<Attribute, object> attributesValues,
 			bool isHidden,
 			bool isDeleted,
 			bool isMarked)
@@ -19,7 +20,7 @@ namespace LandRush.IO.DMF
 			this.scale = scale;
 			this.symbolOrientation = symbolOrientation;
 			this.geometry = geometry;
-			this.parameterValues = parameterValues;
+			this.attributesTable = new AttributesTable(attributesValues);
 			this.isHidden = isHidden;
 			this.isDeleted = isDeleted;
 			this.isMarked = isMarked;
@@ -43,11 +44,13 @@ namespace LandRush.IO.DMF
 		public Geometries.IGeometry Geometry
 		{
 			get { return this.geometry; }
+			set { throw new System.NotSupportedException(); }
 		}
 
-		public object GetParameterValue(Parameter parameter)
+		public IAttributesTable Attributes
 		{
-			return this.parameterValues[parameter];
+			get { return this.attributesTable; }
+			set { throw new System.NotSupportedException(); }
 		}
 
 		public bool IsHidden
@@ -69,7 +72,7 @@ namespace LandRush.IO.DMF
 		private float scale;
 		private int symbolOrientation;
 		private Geometries.IGeometry geometry;
-		private IDictionary<Parameter, object> parameterValues;
+		private IAttributesTable attributesTable;
 		private bool isHidden;
 		private bool isDeleted;
 		private bool isMarked;
