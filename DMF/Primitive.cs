@@ -110,7 +110,8 @@ namespace LandRush.IO.DMF
 
 		public Point2D Centre
 		{
-			get {
+			get
+			{
 				return new Point2D((this.rightBottomPoint.X + this.leftTopPoint.X) / 2,
 					(this.rightBottomPoint.Y + this.leftTopPoint.Y) / 2);
 			}
