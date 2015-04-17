@@ -3,15 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2013
 VisualStudioVersion = 12.0.30723.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DMF", "DMF\DMF.csproj", "{E45A393C-CD44-4948-8C0B-0CDF990B035C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DMF", "src\DMF\DMF.csproj", "{E45A393C-CD44-4948-8C0B-0CDF990B035C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DMF.Viewer", "DMF.Viewer\DMF.Viewer.csproj", "{FB1639F1-69C0-41ED-B9DC-86D1BD0F1412}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".nuget", ".nuget", "{6F5B5915-E98C-411A-9082-B1D9AA3C8BC9}"
-	ProjectSection(SolutionItems) = preProject
-		.nuget\NuGet.Config = .nuget\NuGet.Config
-		.nuget\NuGet.targets = .nuget\NuGet.targets
-	EndProjectSection
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DMF.Viewer", "src\DMF.Viewer\DMF.Viewer.csproj", "{FB1639F1-69C0-41ED-B9DC-86D1BD0F1412}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
