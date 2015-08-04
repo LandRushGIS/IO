@@ -4,7 +4,6 @@
 	"authors": [ "kaeravir", "nipheris" ],
 	"tags": [ "GIS", "DMF" ],
 	"copyright": "Copyright @ 2015",
-	"repository": { "type": "git" },
 	"projectUrl": "https://github.com/LandRushGIS/IO",
 	"licenseUrl": "https://github.com/LandRushGIS/IO/blob/master/LICENSE",
 
