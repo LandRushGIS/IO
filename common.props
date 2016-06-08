@@ -1,28 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 	<PropertyGroup>
-		<AppDesignerFolder>Properties</AppDesignerFolder>
-		<FileAlignment>512</FileAlignment>
-		<SignAssembly>true</SignAssembly>
-		<AssemblyOriginatorKeyFile Condition="$(AssemblyOriginatorKeyFile) == ''">..\..\key.snk</AssemblyOriginatorKeyFile>
-		<DelaySign Condition="$(DelaySign) == ''">true</DelaySign>
-		<BaseIntermediateOutputPath Condition="$(BaseIntermediateOutputPath) == ''">..\..\intermediate</BaseIntermediateOutputPath>
-		<IntermediateOutputPath>$(BaseIntermediateOutputPath)\$(Platform)\$(Configuration)\$(AssemblyName)\</IntermediateOutputPath>
+		<VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">14.0</VisualStudioVersion>
+		<VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>
+	</PropertyGroup>
+	<Import Project="$(VSToolsPath)\DNX\Microsoft.DNX.Props" Condition="'$(VSToolsPath)' != ''" />
+	<PropertyGroup>
+		<BaseIntermediateOutputPath Condition="$(BaseIntermediateOutputPath) == ''">..\..\intermediate\$(MSBuildProjectName)</BaseIntermediateOutputPath>
 		<BaseOutputPath Condition="$(BaseOutputPath) == ''">..\..\output</BaseOutputPath>
-		<OutputPath>$(BaseOutputPath)\$(Platform)\$(Configuration)\</OutputPath>
-		<ErrorReport>prompt</ErrorReport>
-		<WarningLevel>4</WarningLevel>
+		<OutputPath>$(BaseOutputPath)\$(MSBuildProjectName)</OutputPath>
 	</PropertyGroup>
-	<PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-		<DebugSymbols>true</DebugSymbols>
-		<DebugType>full</DebugType>
-		<Optimize>false</Optimize>
-		<DefineConstants>DEBUG;TRACE</DefineConstants>
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<ProduceOutputsOnBuild>true</ProduceOutputsOnBuild>
 	</PropertyGroup>
-	<PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-		<DebugType>pdbonly</DebugType>
-		<Optimize>true</Optimize>
-		<DefineConstants>TRACE</DefineConstants>
-	</PropertyGroup>
-	<Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+	<Import Project="$(VSToolsPath)\DNX\Microsoft.DNX.targets" Condition="'$(VSToolsPath)' != ''" />
 </Project>

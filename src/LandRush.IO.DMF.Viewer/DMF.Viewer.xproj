@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<PropertyGroup>
+		<ProjectGuid>{FB1639F1-69C0-41ED-B9DC-86D1BD0F1412}</ProjectGuid>
+	</PropertyGroup>
+	<Import Project="..\..\common.props" />
+</Project>

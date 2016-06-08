@@ -18,6 +18,22 @@
 			return !((point1.X == point2.X) && (point1.Y == point2.Y));
 		}
 
+		public override bool Equals(object obj)
+		{
+			if (!(obj is Point2D))
+			{
+				return false;
+			}
+
+			Point2D point = (Point2D)obj;
+			return this == point;
+		}
+
+		public override int GetHashCode()
+		{
+			return X.GetHashCode() ^ Y.GetHashCode();
+		}
+
 		public readonly int X;
 		public readonly int Y;
 	}

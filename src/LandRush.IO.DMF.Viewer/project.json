@@ -1,0 +1,45 @@
+{
+	"version": "0.1.0-*",
+	"description": "LandRush GIS IO component - sample DMF viewer",
+	"authors": [ "kaeravir", "nipheris" ],
+	"tags": [ "GIS", "DMF" ],
+	"copyright": "Copyright @ 2015",
+	"repository": { "type": "git" },
+	"projectUrl": "https://github.com/LandRushGIS/IO",
+	"licenseUrl": "https://github.com/LandRushGIS/IO/blob/master/LICENSE",
+
+	"dependencies": {
+		"GeoAPI": "1.7.3.1",
+		"NetTopologySuite": "1.13.3.2",
+		"LandRush.IO.DMF": "0.1.0-*"
+	},
+
+	"frameworks": {
+		"dnx451": { },
+		"net40": { }
+	},
+
+	"compilationOptions": {
+		"keyFile": "../../key.snk"
+	},
+
+	"configurations": {
+		"Debug": {
+			"compilationOptions": {
+				"define": [ "DEBUG", "TRACE" ],
+				"delaySign": true
+			}
+		},
+		"Release": {
+			"compilationOptions": {
+				"define": [ "RELEASE", "TRACE" ],
+				"warningsAsErrors": true,
+				"optimize": true
+			}
+		}
+	},
+
+	"commands": {
+		"DMF.Viewer": "LandRush.IO.DMF.Viewer"
+	}
+}
