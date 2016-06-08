@@ -1,8 +1,8 @@
 ﻿namespace LandRush.IO.DMF
 {
-	public class Parameter
+	public class Attribute
 	{
-		public Parameter(
+		public Attribute(
 			int id,
 			string name,
 			System.Type valueType,
